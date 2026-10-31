@@ -304,6 +304,10 @@ place them under a top-level `docs/` or `screenshots/` directory and reference t
 - Never commit tokens, real hostnames, private paths, or personal data; configuration flows through
   env vars (Linux) and Settings/Keychain (macOS).
 
+Project page: [shadowfetchlinux.org/open-source/projects/agent-news-bot](https://www.shadowfetchlinux.org/open-source/projects/agent-news-bot)
+
+Like this project? You can [buy me a coffee](https://www.buymeacoffee.com/shadowfetcu).
+
 ## License
 
 **MIT** (see [LICENSE](LICENSE)). The project uses only system frameworks on macOS and
