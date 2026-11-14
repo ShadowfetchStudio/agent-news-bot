@@ -207,12 +207,17 @@ third-party Swift packages — it compiles straight from source with `swiftc`.
 
 ```bash
 ./build.sh
-open "/Applications/Agent News Bot.app"
+open "build/Agent News Bot.app"
 ```
 
 `build.sh` renders the icon, compiles all `Sources/*.swift` into an app bundle, writes `Info.plist`,
-ad-hoc code-signs, and installs to `/Applications`. Launch it, open **Fetch Fresh** (⌘R), and the
+ad-hoc code-signs and verifies the bundle in `build/Agent News Bot.app`. It does not install
+or remove any existing application or saved data. Open that bundle, choose **Fetch Fresh** (⌘R), and the
 bridge starts automatically on `127.0.0.1:18765`.
+
+To install a new copy, run `./build.sh --install`. The installer refuses to overwrite
+an existing `/Applications/Agent News Bot.app`; review the built copy and replace an
+old installation manually if desired. It never removes NewsBot or its saved data.
 
 ## Build & run — Linux
 
@@ -282,7 +287,7 @@ place them under a top-level `docs/` or `screenshots/` directory and reference t
 
 ```
 .
-├── build.sh                     # macOS build → /Applications
+├── build.sh                     # macOS build; optional --install
 ├── Resources/                   # app icon source + icon-drawing script
 ├── Sources/                     # macOS SwiftUI app (one file per concern)
 ├── skills/agent-news-bot/       # generic skill descriptor (localhost API)

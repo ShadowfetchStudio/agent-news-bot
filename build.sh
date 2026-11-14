@@ -1,6 +1,22 @@
 #!/bin/bash
-# Build Agent News Bot, install to /Applications, then remove NewsBot.
+# Build Agent News Bot locally. Installation is explicit: ./build.sh --install.
 set -euo pipefail
+
+INSTALL=0
+case "${1:-}" in
+  "") ;;
+  --install) INSTALL=1 ;;
+  --help|-h)
+    echo "Usage: ./build.sh [--install]"
+    echo "Builds under build/. --install copies to /Applications only if absent."
+    echo "Existing applications and NewsBot data are never removed."
+    exit 0 ;;
+  *) echo "Unknown argument: $1" >&2; exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  echo "Usage: ./build.sh [--install]" >&2
+  exit 2
+fi
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$PROJECT_DIR/Sources"
@@ -12,16 +28,21 @@ APP_DIR="$BUILD/$APP_NAME.app"
 INSTALL_PATH="/Applications/$APP_NAME.app"
 BUNDLE_ID="ai.shadowfetch.agentnewsbot"
 
+if [[ "$INSTALL" == 1 && -e "$INSTALL_PATH" ]]; then
+  echo "Refusing to overwrite $INSTALL_PATH. Build without --install, then replace it manually after review." >&2
+  exit 1
+fi
+
 cd "$PROJECT_DIR"
 echo "==> Cleaning"
 rm -rf "$BUILD"
 mkdir -p "$BUILD" "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 echo "==> Icon"
-swift "$RES/draw_icon.swift" "$RES/icon-1024.png"
+swift "$RES/draw_icon.swift" "$BUILD/icon-1024.png"
 ICONSET="$BUILD/AppIcon.iconset"
 mkdir -p "$ICONSET"
-PNG="$RES/icon-1024.png"
+PNG="$BUILD/icon-1024.png"
 sips -z 16 16 "$PNG" --out "$ICONSET/icon_16x16.png" >/dev/null
 sips -z 32 32 "$PNG" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
 sips -z 32 32 "$PNG" --out "$ICONSET/icon_32x32.png" >/dev/null
@@ -35,7 +56,10 @@ cp "$PNG" "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 echo "==> Compiling"
-# shellcheck disable=SC2046
+SWIFT_SOURCES=()
+while IFS= read -r -d '' source; do
+  SWIFT_SOURCES+=("$source")
+done < <(find "$SRC" -name '*.swift' -print0)
 swiftc \
   -O \
   -whole-module-optimization \
@@ -50,7 +74,7 @@ swiftc \
   -framework Network \
   -lsqlite3 \
   -o "$APP_DIR/Contents/MacOS/$BIN_NAME" \
-  $(find "$SRC" -name '*.swift' | sort)
+  "${SWIFT_SOURCES[@]}"
 chmod +x "$APP_DIR/Contents/MacOS/$BIN_NAME"
 
 echo "==> Info.plist"
@@ -82,26 +106,19 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 EOF
 
 echo "==> Ad-hoc sign"
-codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+codesign --force --deep --sign - "$APP_DIR"
+codesign --verify --deep --strict "$APP_DIR"
 
-echo "==> Install $INSTALL_PATH"
-if pgrep -f "AgentNewsBot" >/dev/null 2>&1; then
-  osascript -e 'tell application "Agent News Bot" to quit' 2>/dev/null || true
-  sleep 1
+if [[ "$INSTALL" == 1 ]]; then
+  # Recheck after the build in case another process installed it meanwhile.
+  if [[ -e "$INSTALL_PATH" ]]; then
+    echo "Refusing to overwrite $INSTALL_PATH." >&2
+    exit 1
+  fi
+  cp -R "$APP_DIR" "$INSTALL_PATH"
+  echo "Installed: $INSTALL_PATH"
+else
+  echo "Built: $APP_DIR"
+  echo "To install a new copy: ./build.sh --install"
 fi
-rm -rf "$INSTALL_PATH"
-cp -R "$APP_DIR" "$INSTALL_PATH"
-xattr -dr com.apple.quarantine "$INSTALL_PATH" 2>/dev/null || true
-
-echo "==> Removing NewsBot"
-if pgrep -x "NewsBot" >/dev/null 2>&1; then
-  osascript -e 'tell application "NewsBot" to quit' 2>/dev/null || pkill -x NewsBot || true
-  sleep 1
-fi
-rm -rf /Applications/NewsBot.app
-rm -rf "$HOME/Library/Application Support/NewsBot"
-
-echo
-echo "Installed: $INSTALL_PATH"
-echo "NewsBot removed."
-echo "Open with: open \"$INSTALL_PATH\""
+echo "Existing NewsBot applications and saved data were preserved."
