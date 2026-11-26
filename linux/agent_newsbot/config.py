@@ -16,9 +16,10 @@ MARKET_SYMBOLS = os.environ.get(
 )
 FETCH_INTERVAL = int(os.environ.get("AGENT_NEWSBOT_FETCH_INTERVAL", "900"))
 USER_AGENT = (
-    "AgentNewsBot/1.0 (+https://github.com/Realbobcorbin/agent-news-bot; Linux) "
+    "AgentNewsBot/1.1 (+https://github.com/ShadowfetchStudio/agent-news-bot; Linux) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
 )
+SEEN_RETENTION_DAYS = float(os.environ.get("AGENT_NEWSBOT_RETENTION_DAYS", "30"))
 
 DESK_TITLES = {
     "breaking": "Breaking",

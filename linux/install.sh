@@ -1,15 +1,5 @@
 #!/bin/bash
 # Install Agent News Bot as a systemd service on Linux. Run as root.
-#
-# Creates a dedicated service user, installs the Python package under a prefix,
-# creates state directories, installs a systemd unit from the shipped example,
-# and starts the service. Everything is overridable via environment variables:
-#
-#   PREFIX      install prefix for the package        (default /opt/agent-news-bot)
-#   STATE_DIR   writable state (ledger + token + snapshot) (default /var/lib/agent-news-bot)
-#   SVC_USER    dedicated service account             (default agentnewsbot)
-#
-# Example:  sudo PREFIX=/opt/agent-news-bot ./install.sh
 set -euo pipefail
 
 PREFIX="${PREFIX:-/opt/agent-news-bot}"
@@ -31,16 +21,33 @@ id "$SVC_USER" >/dev/null 2>&1 || useradd --system --create-home \
 install -d -o "$SVC_USER" -g "$SVC_USER" -m 0750 \
   "$STATE_DIR" "$STATE_DIR/export" "$STATE_DIR/shared"
 
-# 3) install the package and CLI wrapper
+# 3) clean install of the package + isolated venv with pinned deps
 install -d -m 0755 "$PREFIX"
+rm -rf "$PREFIX/agent_newsbot"
 cp -r "$HERE/agent_newsbot" "$PREFIX/"
-install -m 0755 "$HERE/agent-newsbot" /usr/local/bin/agent-newsbot
+if [ ! -x "$PREFIX/.venv/bin/python" ]; then
+  python3 -m venv "$PREFIX/.venv"
+fi
+"$PREFIX/.venv/bin/pip" install --quiet --upgrade pip
+"$PREFIX/.venv/bin/pip" install --quiet -r "$HERE/requirements.txt"
 
-# 4) systemd unit from the shipped example, rewritten to the chosen paths/user
+# CLI wrapper using the prefix venv when available
+cat > /usr/local/bin/agent-newsbot <<EOF
+#!/bin/sh
+export AGENT_NEWSBOT_PREFIX="\${AGENT_NEWSBOT_PREFIX:-${PREFIX}}"
+if [ -x "\$AGENT_NEWSBOT_PREFIX/.venv/bin/python" ]; then
+  exec "\$AGENT_NEWSBOT_PREFIX/.venv/bin/python" -m agent_newsbot "\$@"
+fi
+exec /usr/bin/env python3 -m agent_newsbot "\$@"
+EOF
+chmod 0755 /usr/local/bin/agent-newsbot
+
+# 4) systemd unit from the shipped example, rewritten to the chosen paths/user + venv
 sed -e "s#/opt/agent-news-bot#${PREFIX}#g" \
     -e "s#/var/lib/agent-news-bot#${STATE_DIR}#g" \
     -e "s#^User=agentnewsbot#User=${SVC_USER}#" \
     -e "s#^Group=agentnewsbot#Group=${SVC_USER}#" \
+    -e "s#^ExecStart=/usr/bin/python3#ExecStart=${PREFIX}/.venv/bin/python#" \
     "$HERE/agent-news-bot.service.example" > /etc/systemd/system/agent-news-bot.service
 
 systemctl daemon-reload

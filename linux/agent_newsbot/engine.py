@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -21,18 +22,44 @@ from .config import (
     MARKET_SYMBOLS,
     MAX_PER_DESK,
     RSS_FEEDS,
+    SEEN_RETENTION_DAYS,
     USER_AGENT,
     WEATHER_CITY,
 )
-from .store import FreshnessStore, article_id, canonical_url, iso, parse_date, strip_html
+from .store import (
+    FreshnessStore,
+    article_id,
+    canonical_url,
+    is_near_duplicate_title,
+    iso,
+    parse_date,
+    strip_html,
+    title_tokens,
+)
 
 log = logging.getLogger("agent_newsbot")
-SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": USER_AGENT})
+_THREAD_LOCAL = threading.local()
 
 
-def _get(url: str, accept: str = "*/*", timeout: int = 14) -> requests.Response:
-    return SESSION.get(url, timeout=timeout, headers={"Accept": accept})
+def _session() -> requests.Session:
+    sess = getattr(_THREAD_LOCAL, "session", None)
+    if sess is None:
+        sess = requests.Session()
+        sess.headers.update({"User-Agent": USER_AGENT})
+        _THREAD_LOCAL.session = sess
+    return sess
+
+
+def _get(
+    url: str,
+    accept: str = "*/*",
+    timeout: int = 14,
+    extra_headers: dict[str, str] | None = None,
+) -> requests.Response:
+    headers = {"Accept": accept}
+    if extra_headers:
+        headers.update(extra_headers)
+    return _session().get(url, timeout=timeout, headers=headers)
 
 
 def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
@@ -43,8 +70,21 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
     seen_urls: set[str] = set()
     for url, label in RSS_FEEDS.get(desk, []):
         try:
-            resp = _get(url, accept="application/rss+xml, application/atom+xml, application/xml, text/xml, */*")
+            etag, last_mod = store.feed_cache(url)
+            cond: dict[str, str] = {}
+            if etag:
+                cond["If-None-Match"] = etag
+            if last_mod:
+                cond["If-Modified-Since"] = last_mod
+            resp = _get(
+                url,
+                accept="application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+                extra_headers=cond,
+            )
+            if resp.status_code == 304:
+                continue
             resp.raise_for_status()
+            store.save_feed_cache(url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"))
             parsed = feedparser.parse(resp.content)
             for entry in parsed.entries:
                 link = canonical_url(getattr(entry, "link", "") or "")
@@ -397,10 +437,21 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
             results.append(fut.result())
     results.sort(key=lambda r: DESK_TITLES.get(r.desk, r.desk))
     articles: list[Article] = []
+    seen_ids: set[str] = set()
+    seen_title_sets: list[set[str]] = []
     for result in results:
-        articles.extend(result.articles)
         for article in result.articles:
             store.mark(article.id, article.url, article.title, article.desk)
+            if article.id in seen_ids:
+                continue
+            toks = title_tokens(article.title)
+            if any(is_near_duplicate_title(prev, toks) for prev in seen_title_sets):
+                continue
+            seen_ids.add(article.id)
+            if len(toks) >= 4:
+                seen_title_sets.append(toks)
+            articles.append(article)
+    store.prune_seen(older_than_days=SEEN_RETENTION_DAYS)
     articles.sort(key=lambda a: a.published or "", reverse=True)
     scanned = sum(len(r.articles) + r.skipped_old + r.skipped_dup for r in results)
     return {

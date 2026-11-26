@@ -11,20 +11,35 @@ final class FreshnessStore: @unchecked Sendable {
             db = nil
             return
         }
-        exec("""
-        CREATE TABLE IF NOT EXISTS seen (
-            id TEXT PRIMARY KEY,
-            url TEXT,
-            title TEXT,
-            desk TEXT,
-            seen_at REAL
-        );
-        CREATE TABLE IF NOT EXISTS quotes (
-            symbol TEXT PRIMARY KEY,
-            payload TEXT,
-            updated_at REAL
-        );
-        """)
+        sqlite3_busy_timeout(db, 5000)
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(
+            db,
+            """
+            CREATE TABLE IF NOT EXISTS seen (
+                id TEXT PRIMARY KEY,
+                url TEXT,
+                title TEXT,
+                desk TEXT,
+                seen_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_seen_at ON seen(seen_at);
+            CREATE TABLE IF NOT EXISTS quotes (
+                symbol TEXT PRIMARY KEY,
+                payload TEXT,
+                updated_at REAL
+            );
+            CREATE TABLE IF NOT EXISTS feed_cache (
+                url TEXT PRIMARY KEY,
+                etag TEXT,
+                last_modified TEXT,
+                updated_at REAL
+            );
+            """,
+            nil,
+            nil,
+            nil
+        )
     }
 
     deinit {
@@ -34,12 +49,13 @@ final class FreshnessStore: @unchecked Sendable {
     func hasSeen(_ id: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        guard db != nil else { return false }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, "SELECT 1 FROM seen WHERE id = ? LIMIT 1", -1, &stmt, nil) == SQLITE_OK else {
             return false
         }
-        sqlite3_bind_text(stmt, 1, id, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        bind(stmt, 1, id)
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
@@ -58,9 +74,22 @@ final class FreshnessStore: @unchecked Sendable {
         )
     }
 
+    func pruneSeen(olderThanDays days: Double = 30) {
+        lock.lock()
+        defer { lock.unlock() }
+        let cutoff = Date().timeIntervalSince1970 - days * 86_400
+        exec(
+            "DELETE FROM seen WHERE seen_at < ?",
+            bind: { stmt in
+                sqlite3_bind_double(stmt, 1, cutoff)
+            }
+        )
+    }
+
     func lastQuote(_ symbol: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
+        guard db != nil else { return nil }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, "SELECT payload FROM quotes WHERE symbol = ?", -1, &stmt, nil) == SQLITE_OK else {
@@ -84,6 +113,37 @@ final class FreshnessStore: @unchecked Sendable {
         )
     }
 
+    func feedCache(_ url: String) -> (etag: String?, lastModified: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard db != nil else { return (nil, nil) }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT etag, last_modified FROM feed_cache WHERE url = ?", -1, &stmt, nil) == SQLITE_OK else {
+            return (nil, nil)
+        }
+        bind(stmt, 1, url)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return (nil, nil) }
+        let etag = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+        let lm = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+        return (etag, lm)
+    }
+
+    func saveFeedCache(_ url: String, etag: String?, lastModified: String?) {
+        guard etag != nil || lastModified != nil else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        exec(
+            "INSERT OR REPLACE INTO feed_cache(url, etag, last_modified, updated_at) VALUES (?,?,?,?)",
+            bind: { stmt in
+                self.bind(stmt, 1, url)
+                self.bind(stmt, 2, etag ?? "")
+                self.bind(stmt, 3, lastModified ?? "")
+                sqlite3_bind_double(stmt, 4, Date().timeIntervalSince1970)
+            }
+        )
+    }
+
     func isWithinLookback(_ published: Date?, hours: Double) -> Bool {
         guard let published else { return true }
         return published >= Date().addingTimeInterval(-hours * 3600)
@@ -96,11 +156,31 @@ final class FreshnessStore: @unchecked Sendable {
         return hex.isEmpty ? fallback : String(hex.prefix(24))
     }
 
+    static func titleTokens(_ title: String) -> Set<String> {
+        let stop: Set<String> = [
+            "the", "and", "for", "that", "with", "from", "this", "have", "will",
+            "are", "was", "were", "has", "had", "into", "over", "after", "says", "said"
+        ]
+        let words = title.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count >= 3 && !stop.contains($0) }
+        return Set(words)
+    }
+
+    static func isNearDuplicateTitle(_ a: Set<String>, _ b: Set<String>, threshold: Double = 0.72) -> Bool {
+        guard a.count >= 4, b.count >= 4 else { return false }
+        let inter = a.intersection(b).count
+        let union = a.union(b).count
+        return union > 0 && (Double(inter) / Double(union)) >= threshold
+    }
+
     private func bind(_ stmt: OpaquePointer?, _ idx: Int32, _ value: String) {
         sqlite3_bind_text(stmt, idx, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
     }
 
     private func exec(_ sql: String, bind: ((OpaquePointer?) -> Void)? = nil) {
+        guard db != nil else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         bind?(stmt)

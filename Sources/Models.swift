@@ -125,7 +125,14 @@ struct AgentStatus: Equatable {
 
 enum UserAgent {
     static let current =
-        "AgentNewsBot/1.0 (+https://github.com/Realbobcorbin/agent-news-bot; Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+        "AgentNewsBot/1.1 (+https://github.com/ShadowfetchStudio/agent-news-bot; Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+}
+
+struct ConditionalResponse {
+    var notModified: Bool
+    var data: Data
+    var etag: String?
+    var lastModified: String?
 }
 
 enum Net {
@@ -137,6 +144,41 @@ enum Net {
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         return data
+    }
+
+    static func dataConditional(
+        from url: URL,
+        etag: String?,
+        lastModified: String?,
+        timeout: TimeInterval = 14,
+        accept: String = "*/*"
+    ) async throws -> ConditionalResponse {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        if let etag, !etag.isEmpty {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        if let lastModified, !lastModified.isEmpty {
+            request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if http.statusCode == 304 {
+            return ConditionalResponse(
+                notModified: true,
+                data: Data(),
+                etag: http.value(forHTTPHeaderField: "ETag") ?? etag,
+                lastModified: http.value(forHTTPHeaderField: "Last-Modified") ?? lastModified
+            )
+        }
+        guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        return ConditionalResponse(
+            notModified: false,
+            data: data,
+            etag: http.value(forHTTPHeaderField: "ETag"),
+            lastModified: http.value(forHTTPHeaderField: "Last-Modified")
+        )
     }
 
     static func json(from url: URL, timeout: TimeInterval = 14) async throws -> Any {

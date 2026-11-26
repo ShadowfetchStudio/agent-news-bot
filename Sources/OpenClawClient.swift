@@ -33,7 +33,7 @@ enum OpenClawClient {
     static func send(articles: [Article], settings: SettingsStore) async throws -> String {
         let body = HermesClient.brief(articles)
         if let path = HermesClient.which("openclaw") {
-            return try runCLI(path: path, prompt: body)
+            return try await runCLI(path: path, prompt: body)
         }
         throw NSError(
             domain: "OpenClaw",
@@ -42,22 +42,40 @@ enum OpenClawClient {
         )
     }
 
-    private static func runCLI(path: String, prompt: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["agent", "--message", prompt]
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        try process.run()
-        process.waitUntilExit()
-        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        if process.terminationStatus != 0 {
-            let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw NSError(domain: "OpenClaw", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr.isEmpty ? stdout : stderr])
-        }
-        return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func runCLI(path: String, prompt: String) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = ["agent", "--message", prompt]
+            let out = Pipe()
+            let err = Pipe()
+            process.standardOutput = out
+            process.standardError = err
+            try process.run()
+
+            var stdoutData = Data()
+            var stderrData = Data()
+            let group = DispatchGroup()
+            group.enter()
+            DispatchQueue.global().async {
+                stdoutData = out.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                stderrData = err.fileHandleForReading.readDataToEndOfFile()
+                group.leave()
+            }
+            group.wait()
+            process.waitUntilExit()
+
+            let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+            if process.terminationStatus != 0 {
+                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                throw NSError(domain: "OpenClaw", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr.isEmpty ? stdout : stderr])
+            }
+            return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.value
     }
 
     static func portOpen(_ urlString: String) async -> Bool {

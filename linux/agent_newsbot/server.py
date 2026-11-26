@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import secrets
@@ -128,7 +129,8 @@ class Handler(BaseHTTPRequestHandler):
     def _authorized(self) -> bool:
         auth = self.headers.get("Authorization", "")
         alt = self.headers.get("X-Agent-Token", "")
-        return auth == f"Bearer {STATE.token}" or alt == STATE.token
+        expected_bearer = f"Bearer {STATE.token}"
+        return hmac.compare_digest(auth, expected_bearer) or hmac.compare_digest(alt, STATE.token)
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -140,31 +142,49 @@ class Handler(BaseHTTPRequestHandler):
             self._send(401, {"error": "bearer token required"})
             return
         qs = parse_qs(parsed.query)
-        if path.startswith("/v1/fresh"):
+        if path == "/v1/fresh":
             with STATE.lock:
                 articles = list(STATE.snapshot.get("articles") or [])
             desk = (qs.get("desk") or [None])[0]
             if desk:
                 articles = [a for a in articles if a.get("desk") == desk]
-            limit = int((qs.get("limit") or ["100"])[0])
-            articles = articles[:limit]
+            raw_limit = (qs.get("limit") or ["100"])[0]
+            try:
+                limit = int(raw_limit)
+                if limit < 0:
+                    raise ValueError("negative limit")
+            except ValueError:
+                self._send(400, {"error": "invalid limit parameter"})
+                return
+            articles = articles[: min(limit, 500)]
             self._send(200, {"count": len(articles), "articles": articles})
             return
-        if path.startswith("/v1/desks"):
+        if path.startswith("/v1/articles/"):
+            target_id = path[len("/v1/articles/") :]
+            with STATE.lock:
+                articles = list(STATE.snapshot.get("articles") or [])
+            found = next((a for a in articles if a.get("id") == target_id), None)
+            if found is None:
+                self._send(404, {"error": "article not found"})
+                return
+            self._send(200, {"article": found})
+            return
+        if path == "/v1/desks":
             with STATE.lock:
                 desks = STATE.snapshot.get("desks") or []
             self._send(200, {"desks": desks})
             return
-        if path.startswith("/v1/status"):
+        if path == "/v1/status":
             with STATE.lock:
                 snap = STATE.snapshot
+                fetching = STATE.fetching
             self._send(
                 200,
                 {
                     "ok": True,
                     "fresh": snap.get("total_articles", 0),
                     "fetched_at": snap.get("fetched_at"),
-                    "fetching": STATE.fetching,
+                    "fetching": fetching,
                 },
             )
             return

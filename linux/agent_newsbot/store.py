@@ -84,9 +84,16 @@ class FreshnessStore:
                     desk TEXT,
                     seen_at REAL
                 );
+                CREATE INDEX IF NOT EXISTS idx_seen_at ON seen(seen_at);
                 CREATE TABLE IF NOT EXISTS quotes (
                     symbol TEXT PRIMARY KEY,
                     payload TEXT,
+                    updated_at REAL
+                );
+                CREATE TABLE IF NOT EXISTS feed_cache (
+                    url TEXT PRIMARY KEY,
+                    etag TEXT,
+                    last_modified TEXT,
                     updated_at REAL
                 );
                 """
@@ -130,3 +137,45 @@ class FreshnessStore:
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
         return published >= cutoff
+
+    def prune_seen(self, older_than_days: float = 30.0) -> int:
+        cutoff = datetime.now(timezone.utc).timestamp() - older_than_days * 86_400
+        with self._lock, self._connect() as db:
+            cur = db.execute("DELETE FROM seen WHERE seen_at < ?", (cutoff,))
+            db.commit()
+            return cur.rowcount
+
+    def feed_cache(self, url: str) -> tuple[str | None, str | None]:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT etag, last_modified FROM feed_cache WHERE url = ?", (url,)).fetchone()
+            if not row:
+                return None, None
+            return (row[0] or None), (row[1] or None)
+
+    def save_feed_cache(self, url: str, etag: str | None, last_modified: str | None) -> None:
+        if not etag and not last_modified:
+            return
+        with self._lock, self._connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO feed_cache(url, etag, last_modified, updated_at) VALUES (?,?,?,?)",
+                (url, etag or "", last_modified or "", datetime.now(timezone.utc).timestamp()),
+            )
+            db.commit()
+
+
+_TITLE_STOP = {
+    "the", "and", "for", "that", "with", "from", "this", "have", "will",
+    "are", "was", "were", "has", "had", "into", "over", "after", "says", "said",
+}
+
+
+def title_tokens(title: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]{3,}", (title or "").lower())
+    return {w for w in words if w not in _TITLE_STOP}
+
+
+def is_near_duplicate_title(a: set[str], b: set[str], threshold: float = 0.72) -> bool:
+    if len(a) < 4 or len(b) < 4:
+        return False
+    union = a | b
+    return bool(union) and (len(a & b) / len(union)) >= threshold

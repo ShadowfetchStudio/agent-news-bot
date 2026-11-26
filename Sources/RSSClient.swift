@@ -11,11 +11,16 @@ enum RSSClient {
         for feed in FeedRegistry.feeds(for: desk) {
             do {
                 guard let url = URL(string: feed.url) else { continue }
-                let data = try await Net.data(
+                let cached = store.feedCache(feed.url)
+                let res = try await Net.dataConditional(
                     from: url,
+                    etag: cached.etag,
+                    lastModified: cached.lastModified,
                     accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
                 )
-                let items = RSSParser.parse(data: data)
+                if res.notModified { continue }
+                store.saveFeedCache(feed.url, etag: res.etag, lastModified: res.lastModified)
+                let items = RSSParser.parse(data: res.data)
                 for item in items {
                     let link = CanonicalURL.fingerprint(item.link)
                     guard !link.isEmpty, !link.contains("news.google.com") else { continue }

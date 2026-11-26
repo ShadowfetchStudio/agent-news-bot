@@ -2,6 +2,46 @@ import Foundation
 import Combine
 import AppKit
 
+private final class LockedSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var articles: [Article] = []
+    private var desks: [DeskResult] = []
+    private var fetchedAt: String?
+    private var fetching = false
+
+    func update(articles: [Article], desks: [DeskResult], fetchedAt: String) {
+        lock.lock()
+        self.articles = articles
+        self.desks = desks
+        self.fetchedAt = fetchedAt
+        lock.unlock()
+    }
+
+    func setFetching(_ value: Bool) {
+        lock.lock()
+        self.fetching = value
+        lock.unlock()
+    }
+
+    func readArticles() -> [Article] {
+        lock.lock()
+        defer { lock.unlock() }
+        return articles
+    }
+
+    func readDesks() -> [DeskResult] {
+        lock.lock()
+        defer { lock.unlock() }
+        return desks
+    }
+
+    func readStatus() -> BridgeStatusSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return BridgeStatusSnapshot(fresh: articles.count, fetchedAt: fetchedAt, fetching: fetching)
+    }
+}
+
 @MainActor
 final class NewsEngine: ObservableObject {
     static let shared = NewsEngine()
@@ -23,8 +63,7 @@ final class NewsEngine: ObservableObject {
     let store = FreshnessStore(path: AppPaths.seenDB)
     let bridge = AgentBridge()
 
-    nonisolated(unsafe) var snapshotArticles: [Article] = []
-    nonisolated(unsafe) var snapshotDesks: [DeskResult] = []
+    private let snapshot = LockedSnapshot()
 
     var filtered: [Article] {
         var items = articles
@@ -46,14 +85,19 @@ final class NewsEngine: ObservableObject {
 
     func start() {
         settings.save()
-        bridge.articlesProvider = { [weak self] in
-            self?.snapshotArticles ?? []
+        let snap = snapshot
+        bridge.articlesProvider = { snap.readArticles() }
+        bridge.desksProvider = { snap.readDesks() }
+        bridge.statusProvider = { snap.readStatus() }
+        bridge.fetchHandler = { [weak self] in
+            guard let self else { return 0 }
+            await self.fetchFresh()
+            return snap.readArticles().count
         }
-        bridge.desksProvider = { [weak self] in
-            self?.snapshotDesks ?? []
+        bridgeReady = bridge.start(port: settings.bridgePort, token: bridgeToken)
+        if !bridgeReady {
+            status = "Bridge failed to bind on 127.0.0.1:\(settings.bridgePort) (port in use)."
         }
-        bridge.start(port: settings.bridgePort, token: bridgeToken)
-        bridgeReady = true
         Task { await refreshAgents() }
         installHermesSkill()
     }
@@ -61,6 +105,7 @@ final class NewsEngine: ObservableObject {
     func fetchFresh() async {
         guard !isFetching else { return }
         isFetching = true
+        snapshot.setFetching(true)
         status = "Scanning desks for unseen stories…"
         let started = Date()
         let lookback = settings.lookbackHours
@@ -95,28 +140,41 @@ final class NewsEngine: ObservableObject {
 
         results.sort { $0.desk.title < $1.desk.title }
         var merged: [Article] = []
+        var seenIDs = Set<String>()
+        var seenTitleSets: [Set<String>] = []
+
         for result in results {
-            merged.append(contentsOf: result.articles)
             for article in result.articles {
                 store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
+                if seenIDs.contains(article.id) { continue }
+                let tokens = FreshnessStore.titleTokens(article.title)
+                if seenTitleSets.contains(where: { FreshnessStore.isNearDuplicateTitle($0, tokens) }) {
+                    continue
+                }
+                seenIDs.insert(article.id)
+                if tokens.count >= 4 { seenTitleSets.append(tokens) }
+                merged.append(article)
             }
         }
         merged.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        store.pruneSeen(olderThanDays: 30)
 
+        let finished = Date()
+        let fetchedAtISO = ISO8601DateFormatter().string(from: finished)
         desks = results
         articles = merged
         selected = merged.first
-        snapshotArticles = merged
-        snapshotDesks = results
+        snapshot.update(articles: merged, desks: results, fetchedAt: fetchedAtISO)
 
         let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
-        report = FetchReport(started: started, finished: Date(), freshCount: merged.count, scanned: scanned, desks: results)
-        exportJSON()
+        report = FetchReport(started: started, finished: finished, freshCount: merged.count, scanned: scanned, desks: results)
+        exportJSON(fetchedAt: fetchedAtISO)
         let errors = results.flatMap(\.sourceErrors).count
         status = merged.isEmpty
             ? "No fresh stories in the last \(Int(lookback))h. Desks are current."
             : "\(merged.count) fresh stories · \(errors) source warnings"
         isFetching = false
+        snapshot.setFetching(false)
     }
 
     func copyTweet(_ article: Article) {
@@ -166,14 +224,16 @@ final class NewsEngine: ObservableObject {
         NSWorkspace.shared.open(AppPaths.exports)
     }
 
-    private func exportJSON() {
+    private func exportJSON(fetchedAt: String) {
         let payload: [String: Any] = [
-            "fetched_at": ISO8601DateFormatter().string(from: Date()),
+            "fetched_at": fetchedAt,
             "total_articles": articles.count,
             "lookback_hours": settings.lookbackHours,
             "categories": Dictionary(uniqueKeysWithValues: Desk.allCases.map { desk in
                 (desk.title, articles.filter { $0.desk == desk }.map { article -> [String: Any] in
                     [
+                        "id": article.id,
+                        "desk": article.desk.rawValue,
                         "title": article.title,
                         "url": article.url,
                         "source": article.source,
@@ -187,12 +247,27 @@ final class NewsEngine: ObservableObject {
                 })
             })
         ]
-        let stamp = ISO8601DateFormatter()
-        stamp.formatOptions = [.withInternetDateTime]
         let name = "agentnewsbot_\(Int(Date().timeIntervalSince1970)).json"
         let url = AppPaths.exports.appendingPathComponent(name)
+        let latestURL = AppPaths.exports.appendingPathComponent("latest.json")
         if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: url)
+            try? data.write(to: url, options: .atomic)
+            try? data.write(to: latestURL, options: .atomic)
+            pruneOldExports(keep: 50)
+        }
+    }
+
+    private func pruneOldExports(keep: Int) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: AppPaths.exports,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let timestamped = files
+            .filter { $0.lastPathComponent.hasPrefix("agentnewsbot_") && $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for old in timestamped.dropFirst(keep) {
+            try? FileManager.default.removeItem(at: old)
         }
     }
 
@@ -208,14 +283,12 @@ final class NewsEngine: ObservableObject {
     }
 
     private func installHermesSkill() {
-        let dest = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".hermes/skills/agent-news-bot", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        let tokenPath = AppPaths.tokenFile.path
         let skill = """
         ---
         name: agent-news-bot
         description: Pull only fresh, unseen news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-        version: 1.0.0
+        version: 1.1.0
         ---
 
         # Agent News Bot
@@ -223,23 +296,26 @@ final class NewsEngine: ObservableObject {
         Agent News Bot is a macOS newsroom on this machine. It keeps a freshness ledger and only serves stories that have not been shown before and are inside the lookback window.
 
         Base URL: \(bridge.endpoint)
-        Auth: `Authorization: Bearer \(bridgeToken)`
+        Token file (0600): `\(tokenPath)`
+        Auth: `Authorization: Bearer $(cat "\(tokenPath)")`
 
         ## When to use
         Use this when you need current headlines, AI/tech stories, Hacker News, Polymarket, stock moves, or weather for social or newsroom work.
 
         ## Calls
         - `GET /health`
-        - `GET /v1/fresh` — current unseen batch
+        - `GET /v1/fresh?desk=<desk>&limit=<n>` — current unseen batch
+        - `GET /v1/articles/<id>` — single article lookup
         - `GET /v1/desks` — per-desk counts and source errors
+        - `GET /v1/status` — snapshot status
+        - `POST /v1/fetch` — trigger immediate refresh
 
         Do not invent URLs. Prefer the tweet and hashtags fields when drafting social posts. Never print the bearer token in public channels.
         """
-        try? skill.write(to: dest.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
-
-        let agents = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".agents/skills/agent-news-bot", isDirectory: true)
-        try? FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
-        try? skill.write(to: agents.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        for rel in [".hermes/skills/agent-news-bot", ".agents/skills/agent-news-bot"] {
+            let dest = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(rel, isDirectory: true)
+            try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+            try? skill.write(to: dest.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        }
     }
 }

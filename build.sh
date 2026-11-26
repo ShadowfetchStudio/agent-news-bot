@@ -3,20 +3,26 @@
 set -euo pipefail
 
 INSTALL=0
-case "${1:-}" in
-  "") ;;
-  --install) INSTALL=1 ;;
-  --help|-h)
-    echo "Usage: ./build.sh [--install]"
-    echo "Builds under build/. --install copies to /Applications only if absent."
-    echo "Existing applications and NewsBot data are never removed."
-    exit 0 ;;
-  *) echo "Unknown argument: $1" >&2; exit 2 ;;
+ARCH="$(uname -m)"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --install) INSTALL=1; shift ;;
+    --arch)
+      ARCH="${2:-}"
+      shift 2 ;;
+    --help|-h)
+      echo "Usage: ./build.sh [--install] [--arch arm64|x86_64|universal]"
+      echo "Builds under build/. --install copies to /Applications only if absent."
+      echo "Existing applications and NewsBot data are never removed."
+      exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+case "$ARCH" in
+  arm64|x86_64|universal) ;;
+  *) echo "Unsupported --arch: $ARCH (expected arm64, x86_64, or universal)" >&2; exit 2 ;;
 esac
-if [[ $# -gt 1 ]]; then
-  echo "Usage: ./build.sh [--install]" >&2
-  exit 2
-fi
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$PROJECT_DIR/Sources"
@@ -55,26 +61,39 @@ sips -z 512 512 "$PNG" --out "$ICONSET/icon_512x512.png" >/dev/null
 cp "$PNG" "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-echo "==> Compiling"
+echo "==> Compiling ($ARCH)"
 SWIFT_SOURCES=()
 while IFS= read -r -d '' source; do
   SWIFT_SOURCES+=("$source")
 done < <(find "$SRC" -name '*.swift' -print0)
-swiftc \
-  -O \
-  -whole-module-optimization \
-  -target arm64-apple-macos14.0 \
-  -parse-as-library \
-  -framework SwiftUI \
-  -framework AppKit \
-  -framework Foundation \
-  -framework Combine \
-  -framework CryptoKit \
-  -framework Security \
-  -framework Network \
-  -lsqlite3 \
-  -o "$APP_DIR/Contents/MacOS/$BIN_NAME" \
-  "${SWIFT_SOURCES[@]}"
+
+compile_slice() {
+  local target_arch="$1"
+  local out_bin="$2"
+  swiftc \
+    -O \
+    -whole-module-optimization \
+    -target "${target_arch}-apple-macos14.0" \
+    -parse-as-library \
+    -framework SwiftUI \
+    -framework AppKit \
+    -framework Foundation \
+    -framework Combine \
+    -framework CryptoKit \
+    -framework Security \
+    -framework Network \
+    -lsqlite3 \
+    -o "$out_bin" \
+    "${SWIFT_SOURCES[@]}"
+}
+
+if [[ "$ARCH" == "universal" ]]; then
+  compile_slice arm64 "$BUILD/${BIN_NAME}-arm64"
+  compile_slice x86_64 "$BUILD/${BIN_NAME}-x86_64"
+  lipo -create "$BUILD/${BIN_NAME}-arm64" "$BUILD/${BIN_NAME}-x86_64" -output "$APP_DIR/Contents/MacOS/$BIN_NAME"
+else
+  compile_slice "$ARCH" "$APP_DIR/Contents/MacOS/$BIN_NAME"
+fi
 chmod +x "$APP_DIR/Contents/MacOS/$BIN_NAME"
 
 echo "==> Info.plist"
@@ -88,8 +107,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key><string>$BIN_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.1.0</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.news</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -99,7 +118,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <key>LSUIElement</key><false/>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key><true/>
+        <key>NSAllowsLocalNetworking</key><true/>
     </dict>
 </dict>
 </plist>
@@ -110,7 +129,6 @@ codesign --force --deep --sign - "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
 
 if [[ "$INSTALL" == 1 ]]; then
-  # Recheck after the build in case another process installed it meanwhile.
   if [[ -e "$INSTALL_PATH" ]]; then
     echo "Refusing to overwrite $INSTALL_PATH." >&2
     exit 1
