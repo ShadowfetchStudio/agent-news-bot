@@ -1,7 +1,7 @@
 ---
 name: agent-news-bot
 description: Pull only fresh, unseen news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Agent News Bot (Linux)
@@ -33,7 +33,9 @@ TOKEN=$(cat "$AGENT_NEWSBOT_HOME/export/bridge.token")
 curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:18765/health
 curl -sS -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:18765/v1/fresh?limit=30'
 curl -sS -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:18765/v1/fresh?desk=ai'
+curl -sS -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:18765/v1/articles/<id>'
 curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:18765/v1/desks
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:18765/v1/status
 curl -sS -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:18765/v1/fetch
 ```
 

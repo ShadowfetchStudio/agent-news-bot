@@ -140,7 +140,10 @@ against one works against the other.
 
 An item's identity is the SHA-256 of its **canonicalized URL** (tracking params like `utm_*`,
 `fbclid`, `gclid`, `ocid` stripped; host lowercased; trailing slash removed), truncated to 24 hex
-chars. The `seen` table records every id ever served, so an item is emitted **exactly once**. A
+chars. The `seen` table records every id served (automatically pruned after 30 days by default), so
+an item is emitted **exactly once**, while cross-desk fuzzy title matching suppresses near-identical
+headlines across outlets (e.g. NPR/BBC/AP). RSS feeds use conditional HTTP (`ETag` /
+`If-Modified-Since` → `304 Not Modified`) backed by a `feed_cache` table to minimize bandwidth. A
 configurable **lookback window** (default 12h) drops anything older. For `markets` and `weather`,
 a `quotes` table stores the last value so unchanged (or sub-0.15% market) readings are suppressed as
 noise. The result: repeated calls return only genuinely new, recent stories, and an empty result
@@ -150,12 +153,14 @@ means "the desks are current" — not an error.
 
 Base URL: `http://127.0.0.1:18765` (port configurable). All endpoints except `/health` require the
 bearer token in either an `Authorization: Bearer <token>` header **or** an `X-Agent-Token: <token>`
-header. The server binds to loopback only and returns `401` without a valid token.
+header (verified with constant-time comparison). The server binds to loopback only and returns `401`
+without a valid token or `405` on disallowed HTTP methods.
 
 | Method & path | Auth | Description |
 |---------------|------|-------------|
 | `GET /health` | no | Liveness probe; returns app name + bridge URL. |
-| `GET /v1/fresh?desk=<desk>&limit=<n>` | yes | The current fresh batch. Optional `desk` filter and `limit` (default 100). |
+| `GET /v1/fresh?desk=<desk>&limit=<n>` | yes | The current fresh batch. Optional `desk` filter and `limit` (default 100, max 500; `400` on invalid value). |
+| `GET /v1/articles/<id>` | yes | Fetch a single article from the current batch by its 24-hex id (`404` if absent). |
 | `GET /v1/desks` | yes | Per-desk counts: fresh, skipped-old, skipped-dup, and source errors. |
 | `GET /v1/status` | yes | Snapshot summary: total fresh, `fetched_at`, whether a fetch is in flight. |
 | `POST /v1/fetch` | yes | Force an immediate refresh; returns the new total. |
@@ -206,14 +211,17 @@ Requirements: macOS 14+, the Swift toolchain (Xcode or Command Line Tools). No X
 third-party Swift packages — it compiles straight from source with `swiftc`.
 
 ```bash
-./build.sh
+./build.sh                        # builds for host architecture (arm64 on Apple Silicon)
+./build.sh --arch universal       # optional universal (arm64 + x86_64) build
 open "build/Agent News Bot.app"
 ```
 
-`build.sh` renders the icon, compiles all `Sources/*.swift` into an app bundle, writes `Info.plist`,
-ad-hoc code-signs and verifies the bundle in `build/Agent News Bot.app`. It does not install
-or remove any existing application or saved data. Open that bundle, choose **Fetch Fresh** (⌘R), and the
-bridge starts automatically on `127.0.0.1:18765`.
+`build.sh` renders the icon, compiles all `Sources/*.swift` into an app bundle (supporting Apple
+Silicon `arm64`, Intel `x86_64`, or `universal`), writes `Info.plist` (scoped to
+`NSAllowsLocalNetworking` only), ad-hoc code-signs and verifies the bundle in
+`build/Agent News Bot.app`. It does not install or remove any existing application or saved data.
+Open that bundle, choose **Fetch Fresh** (⌘R), and the bridge starts automatically on
+`127.0.0.1:18765` (and writes an atomic `latest.json` alongside pruned timestamped exports).
 
 To install a new copy, run `./build.sh --install`. The installer refuses to overwrite
 an existing `/Applications/Agent News Bot.app`; review the built copy and replace an
@@ -260,6 +268,7 @@ The Linux service is configured entirely through environment variables (all opti
 | `AGENT_NEWSBOT_WEATHER_CITY` | `New York` | City for the weather desk. |
 | `AGENT_NEWSBOT_SYMBOLS` | S&P/Dow/Nasdaq/mega-caps/BTC/ETH | Comma-separated market symbols. |
 | `AGENT_NEWSBOT_FETCH_INTERVAL` | `900` | Seconds between background fetches. |
+| `AGENT_NEWSBOT_RETENTION_DAYS` | `30` | Days to retain rows in SQLite `seen` ledger before pruning. |
 
 On macOS the equivalent settings live in **Settings** (lookback, max per desk, weather city, market
 symbols, bridge port, enabled desks) and persist in `UserDefaults`.
@@ -274,8 +283,9 @@ The macOS app can hand a selected batch to a **local** agent runtime if one is i
 
 Both are **optional** and default to localhost. If neither is present, agents can still simply
 `GET /v1/fresh` from the bridge — the integrations are a convenience, not a requirement. On launch
-the app also writes a small skill descriptor (endpoint + token) to `~/.hermes/skills/` and
-`~/.agents/skills/` so a co-located agent can discover the local desk.
+the app also writes a small skill descriptor to `~/.hermes/skills/` and `~/.agents/skills/`
+referencing the `0600` token file path (never embedding the raw token in plaintext) so a co-located
+agent can discover the local desk safely.
 
 ## Screenshots
 
@@ -287,14 +297,18 @@ place them under a top-level `docs/` or `screenshots/` directory and reference t
 
 ```
 .
-├── build.sh                     # macOS build; optional --install
+├── .github/workflows/ci.yml     # CI: Linux pytest + feed parity, macOS Apple Silicon build
+├── build.sh                     # macOS build (--arch arm64|x86_64|universal; optional --install)
 ├── Resources/                   # app icon source + icon-drawing script
 ├── Sources/                     # macOS SwiftUI app (one file per concern)
 ├── skills/agent-news-bot/       # generic skill descriptor (localhost API)
+├── tests/                       # pytest suite (store, API, fuzzy dedup, Swift/Python parity)
 └── linux/
+    ├── pyproject.toml               # Python package metadata & dependencies
+    ├── requirements.txt             # runtime dependencies
     ├── agent_newsbot/               # Python package: server, engine, store, config…
     ├── agent-newsbot                # CLI wrapper
-    ├── install.sh                   # generic systemd installer (env-var driven)
+    ├── install.sh                   # generic systemd + isolated venv installer
     ├── agent-news-bot.service.example  # path-agnostic example unit
     └── SKILL.md                     # localhost skill descriptor
 ```

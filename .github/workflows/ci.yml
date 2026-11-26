@@ -26,7 +26,7 @@ jobs:
 
   macos-apple-silicon:
     name: macOS Apple Silicon Build
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Validate build.sh syntax
