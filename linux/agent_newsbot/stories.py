@@ -12,6 +12,7 @@ from pathlib import Path
 from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id, can_group_titles
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
+from .group_repairs import GroupRepairMixin, REPAIR_SCHEMA
 from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
 from .private_files import private_database
 from .url_safety import safe_article_url
@@ -61,7 +62,7 @@ def reports_disagree(sources):
     return False
 
 
-class StoryStore(LibraryMixin, ConsumerMixin):
+class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
     def __init__(self, path: Path):
         self.path = path
         private_database(path)
@@ -81,6 +82,7 @@ class StoryStore(LibraryMixin, ConsumerMixin):
 
             for sql in SCHEMA: db.execute(sql)
             db.execute(CONSUMER_SCHEMA)
+            db.execute(REPAIR_SCHEMA)
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM migrations WHERE name='canonical-v2'").fetchone():
                 for url, story_id in db.execute("SELECT url,story_id FROM members ORDER BY url").fetchall():
@@ -123,7 +125,7 @@ class StoryStore(LibraryMixin, ConsumerMixin):
                 if old is None and article["desk"] not in ("weather", "markets", "polymarket"):
                     for candidate, in db.execute("SELECT payload FROM stories WHERE updated>=? ORDER BY updated DESC LIMIT 500", (now.timestamp() - 48*3600,)):
                         candidate = json.loads(candidate)
-                        if candidate["desk"] not in ("weather", "markets", "polymarket") and can_group_titles(article["title"], candidate["title"]):
+                        if not candidate.get("grouping_locked") and not candidate.get("merged_into") and candidate["desk"] not in ("weather", "markets", "polymarket") and can_group_titles(article["title"], candidate["title"]):
                             old = candidate
                             break
                 story_id = old["id"] if old else article["id"]

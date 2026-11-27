@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -695,6 +695,14 @@ def journal_runtime(request, tmp_path):
         def editorial(self, sid): return self.op({"op": "editorial", "id": sid})
         def save_editorial(self, sid, change): return self.op({"op": "save", "id": sid, "change": change})
         def library_settings(self, kind=None, name=None, value=None, write=False): return self.op(dict(op="settings",kind=kind,name=name,value=value,write=write))
+        def repair_group(self, change):
+            result = self.op({"op": "repair", "change": change})
+            if result.get("error"):
+                from agent_newsbot.library import LibraryConflict
+                raise {"conflict": LibraryConflict, "invalid": ValueError, "missing": LookupError, "storage": RuntimeError}[result["error"]](result.get("message", "missing"))
+            return result
+        def repair_receipt(self, op): return self.op({"op": "repair-receipt", "id": op}) or None
+        def reconcile_groups(self, stories): return self.op({"op": "reconcile-groups", "stories": stories})["stories"]
         def research_export(self, sid): return self.op({"op": "export", "id": sid})
     return Native()
 
@@ -1586,3 +1594,242 @@ def test_direct_provider_http_error_retains_retry_after():
         assert (exc.value.status,exc.value.retry_after)==(429,'60')
         assert 'private' not in str(exc.value)
     finally: httpd.shutdown(); httpd.server_close(); thread.join()
+
+
+def repair_request(store, source, action="split", op="repair-1", **extra):
+    current = store.editorial(source)
+    request = dict(operation_id=op, action=action, source_id=source,
+                   expected_revision=current["revision"], expected_editorial_version=current["editorial"]["version"],
+                   reason="Separate reports after reviewing original source evidence.")
+    request.update(extra)
+    if action == "merge":
+        target = store.editorial(request["target_id"])
+        request.update(target_revision=target["revision"], target_editorial_version=target["editorial"]["version"])
+    return request
+
+
+def test_group_split_preserves_observations_drafts_history_and_idempotency(journal_runtime):
+    store = journal_runtime
+    a, b = article(), article(url="https://second.example/b")
+    digest = dict(b, extra={"provider": "worldmonitor", "metadata": {"locationName": "Florida"}})
+    original = store.ingest([a, b, digest])[0]; sid = original["id"]
+    assert len(original["sources"]) == 2
+    state = store.save_editorial(sid, dict(expected_revision=1, expected_editorial_version=0, generate=True, notes="Keep these notes", bookmarked=True))
+    store.save_editorial(sid, dict(expected_revision=1, expected_editorial_version=1, status="approved"))
+    events_before = store.pending("reader")["events"]
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    receipt = store.repair_group(req); child = receipt["after"][1]["id"]
+    assert receipt["before"][0]["editorial"]["status"] == "approved"
+    parent, new = store.editorial(sid), store.editorial(child)
+    assert parent["editorial"]["drafts"] == state["editorial"]["drafts"]
+    assert parent["editorial"]["notes"] == "Keep these notes"
+    assert parent["editorial"]["bookmarked"] is True
+    assert parent["editorial"]["status"] == new["editorial"]["status"] == "needs_review"
+    assert parent["editorial"]["approved_revision"] is None
+    assert new["editorial"]["drafts"] == {} and new["split_from"] == sid
+    assert new["sources"] == [s for s in original["sources"] if s["url"] == b["url"]]
+    assert len(new["sources"][0]["observations"]) == 2
+    assert parent["sources"] == [s for s in original["sources"] if s["url"] == a["url"]]
+    assert parent["grouping_locked"] and new["grouping_locked"]
+    events = store.pending("reader")["events"]
+    assert events[:len(events_before)] == events_before and len(events) == 3
+    assert [e["story"]["change"] for e in events[-2:]] == ["group_repaired"] * 2
+    assert all("event_seq" not in e["story"] for e in events[-2:])
+    assert store.repair_group(req) == receipt == store.repair_receipt(req["operation_id"])
+    assert store.pending("reader")["events"] == events
+    # Replaying the identical reports must not reverse manual separation.
+    assert store.ingest([a, b, digest]) == []
+    b["summary"] = "Corrected details from the second source."
+    assert store.ingest([b])[0]["id"] == child
+    third = store.ingest([article(url="https://third.example/c")])[0]
+    assert third["id"] not in (sid, child)
+    restored = store.reconcile_groups([original])
+    assert {s["id"] for s in restored} == {sid, child}
+    assert next(s for s in restored if s["id"] == child)["summary"] == b["summary"]
+    # Aliases are historical lookups; current ownership is explicit in member rows.
+    import sqlite3
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT story_id FROM members WHERE url=?", (b["url"],)).fetchone()[0] == child
+        assert db.execute("SELECT story_id FROM identity_aliases WHERE alias=?", (b["id"],)).fetchone()[0] == sid
+
+
+def test_group_merge_keeps_retired_identity_and_both_editorial_histories(journal_runtime):
+    store = journal_runtime
+    a = store.ingest([article()])[0]
+    b = store.ingest([article(url="https://other.example/b", title="Lunar mission sends first images home")])[0]
+    for s in (a, b): store.save_editorial(s["id"], dict(expected_revision=1, expected_editorial_version=0, generate=True, notes=s["title"]))
+    before = store.pending("consumer")["events"]
+    req = repair_request(store, a["id"], "merge", target_id=b["id"])
+    receipt = store.repair_group(req)
+    retired, merged = store.editorial(a["id"]), store.editorial(b["id"])
+    assert retired["merged_into"] == b["id"]
+    assert len(merged["sources"]) == 2 and merged["title"] == b["title"]
+    assert retired["editorial"]["notes"] == a["title"]
+    assert merged["editorial"]["notes"] == b["title"]
+    assert all(s["editorial"]["status"] == "needs_review" for s in (retired, merged))
+    assert len(receipt["before"]) == 2
+    assert store.pending("consumer")["events"][:2] == before
+    assert [s["id"] for s in store.library()["stories"]] == [b["id"]]
+    assert len(store.library({"include_merged": "true"})["stories"]) == 2
+    assert [s["id"] for s in store.reconcile_groups([a,b])] == [b["id"]]
+    corrected = article(summary="Updated source report")
+    assert store.ingest([corrected])[0]["id"] == b["id"]
+    assert len(store.revisions(a["id"])) == 2
+    assert store.repair_group(req) == receipt
+
+
+def test_group_repairs_reject_stale_versions_and_conflicting_retries(journal_runtime):
+    from agent_newsbot.library import LibraryConflict
+    store = journal_runtime
+    a, b = article(), article(url="https://second.example/b")
+    sid = store.ingest([a,b])[0]["id"]
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    store.save_editorial(sid, dict(expected_revision=1, expected_editorial_version=0, notes="Concurrent edit"))
+    before = store.pending("reader")["events"]
+    with pytest.raises(LibraryConflict): store.repair_group(req)
+    assert store.pending("reader")["events"] == before
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    a["summary"] = "Concurrent source correction"
+    store.ingest([a])
+    with pytest.raises(LibraryConflict): store.repair_group(req)
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    receipt = store.repair_group(req)
+    with pytest.raises(LibraryConflict): store.repair_group(dict(req, reason="Different intent"))
+    assert store.repair_group(req) == receipt
+    child = receipt["after"][1]["id"]
+    merge = repair_request(store, sid, "merge", "merge-1", target_id=child)
+    store.save_editorial(child, dict(expected_revision=1, expected_editorial_version=1, notes="New child notes"))
+    with pytest.raises(LibraryConflict): store.repair_group(merge)
+    assert not store.story(sid).get("merged_into")
+
+
+def test_group_repair_validation_and_membership_conflict_are_atomic(journal_runtime):
+    import sqlite3
+    from agent_newsbot.library import LibraryConflict
+    store = journal_runtime
+    a, b = article(), article(url="https://second.example/b")
+    original = store.ingest([a,b])[0]; sid = original["id"]
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    invalid = [dict(req, source_urls=[]), dict(req, source_urls=[a["url"], b["url"]]),
+               dict(req, source_urls=[b["url"], b["url"]]), dict(req, source_urls=["https://missing.example/"]),
+               dict(req, expected_revision=True), dict(req, expected_revision=1.0), dict(req, reason=" "),
+               dict(req, operation_id="bad/id"), dict(req, unwanted=True)]
+    for bad in invalid:
+        with pytest.raises(ValueError): store.repair_group(bad)
+    assert store.story(sid) == original
+    assert store.pending("reader")["count"] == 1
+    with sqlite3.connect(store.path) as db: db.execute("UPDATE members SET story_id='wrong-owner' WHERE url=?", (b["url"],))
+    with pytest.raises(LibraryConflict): store.repair_group(req)
+    assert store.story(sid) == original
+    assert store.repair_receipt("repair-1") is None
+
+
+def test_group_split_merge_graph_reconciles_without_loops(journal_runtime):
+    store = journal_runtime
+    a, b = article(), article(url="https://second.example/b")
+    original = store.ingest([a,b])[0]; sid = original["id"]
+    receipt = store.repair_group(repair_request(store, sid, source_urls=[b["url"]]))
+    child = receipt["after"][1]["id"]
+    store.repair_group(repair_request(store, child, "merge", "merge-back", target_id=sid))
+    assert [s["id"] for s in store.reconcile_groups([original])] == [sid]
+    assert len(store.reconcile_groups([original])[0]["sources"]) == 2
+    receipt2 = store.repair_group(repair_request(store, sid, op="split-again", source_urls=[a["url"]]))
+    child2 = receipt2["after"][1]["id"]
+    assert {s["id"] for s in store.reconcile_groups([original])} == {sid, child2}
+    assert store.story(child)["merged_into"] == sid
+    assert len(store.library()["stories"]) == 2
+
+
+def test_group_repair_rolls_back_mid_transaction(journal_runtime):
+    import sqlite3
+    store = journal_runtime
+    a, b = article(), article(url="https://second.example/b")
+    original = store.ingest([a,b])[0]; sid = original["id"]
+    req = repair_request(store, sid, source_urls=[b["url"]])
+    with sqlite3.connect(store.path) as db:
+        # Fail only after the parent event/member mutations have already occurred.
+        db.execute("CREATE TRIGGER fail_child BEFORE INSERT ON events WHEN NEW.story_id != '" + sid + "' BEGIN SELECT RAISE(ABORT,'injected failure'); END")
+        before = {table: db.execute("SELECT * FROM " + table).fetchall() for table in ("stories", "members", "events", "editorial", "identity_aliases", "group_repairs")}
+    with pytest.raises((sqlite3.Error, RuntimeError)): store.repair_group(req)
+    with sqlite3.connect(store.path) as db:
+        after = {table: db.execute("SELECT * FROM " + table).fetchall() for table in before}
+        assert after == before
+        db.execute("DROP TRIGGER fail_child")
+    assert store.repair_group(req)["after"][0]["revision"] == 2
+
+
+@pytest.mark.parametrize("runtime", ["python", "swift"])
+def test_group_repair_http_contract_and_retired_export(runtime, request, tmp_path, monkeypatch):
+    with contextlib.ExitStack() as stack:
+        db = tmp_path / "stories.sqlite"
+        journal = StoryStore(db)
+        a, b = article(), article(url="https://second.example/b")
+        a["published"] = b["published"] = datetime.now(timezone.utc).isoformat()
+        original = journal.ingest([a,b])[0]
+        if runtime == "swift":
+            base, _ = stack.enter_context(native_bridge(request.getfixturevalue("swift_harness"), db))
+            token = "integration-test-token"
+        else:
+            monkeypatch.setattr(server, "HOME", tmp_path); monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+            state = server.NewsState(); monkeypatch.setattr(server, "STATE", state)
+            state.snapshot = dict(articles=[original], fetched_at=a["published"], desks=[{"desk": "science"}])
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+            def stop(): httpd.shutdown(); httpd.server_close(); thread.join()
+            stack.callback(stop); base = f"http://127.0.0.1:{httpd.server_port}"; token = state.token
+        headers = {"Authorization": "Bearer " + token}; route = base + "/v1/library/repairs"
+        req = repair_request(journal, original["id"], source_urls=[b["url"]])
+        assert requests.post(route, json=req, timeout=5).status_code == 401
+        assert requests.get(route, headers=headers, timeout=5).status_code == 400
+        assert requests.post(route, headers=headers, json=dict(req, expected_revision=True), timeout=5).status_code == 400
+        response = requests.post(route, headers=headers, json=req, timeout=5)
+        assert response.status_code == 200, response.text
+        receipt = response.json()["repair"]
+        assert journal.repair_group(req) == receipt  # Receipt replay also works across runtimes.
+        assert response.json()["snapshot_error"] is None
+        assert requests.post(route, headers=headers, json=req, timeout=5).json()["repair"] == receipt
+        assert requests.get(route, headers=headers, params={"operation_id": req["operation_id"]}, timeout=5).json()["repair"] == receipt
+        assert requests.post(route, headers=headers, json=dict(req, reason="Different"), timeout=5).status_code == 409
+        if runtime == "python":
+            assert requests.get(base + "/v1/fresh", headers=headers, timeout=5).json()["count"] == 2
+            assert server.NewsState().snapshot["total_articles"] == 2
+            # Installed-style CLI talks to the same service and reads a durable receipt.
+            merge = repair_request(journal, receipt["after"][1]["id"], "merge", "merge-api", target_id=original["id"])
+            changefile = tmp_path / "repair.json"; changefile.write_text(json.dumps(merge))
+            env = dict(os.environ, PYTHONPATH=str(ROOT / "linux"), AGENT_NEWSBOT_HOME=str(tmp_path), AGENT_NEWSBOT_PORT=str(httpd.server_port))
+            cli = subprocess.run([sys.executable, "-m", "agent_newsbot", "repairs", "--changes", str(changefile)], env=env, cwd=tmp_path, capture_output=True, text=True, timeout=15)
+            assert cli.returncode == 0, cli.stderr
+            assert json.loads(cli.stdout)["repair"]["operation_id"] == "merge-api"
+            assert requests.get(base + "/v1/fresh", headers=headers, timeout=5).json()["count"] == 1
+        else:
+            merge = repair_request(journal, receipt["after"][1]["id"], "merge", "merge-api", target_id=original["id"])
+            assert requests.post(route, headers=headers, json=merge, timeout=5).status_code == 200
+        retired = merge["source_id"]
+        assert requests.get(base + "/v1/library/export", params={"id": retired}, headers=headers, timeout=5).status_code == 409
+        assert requests.post(base + "/v1/library/editorial", params={"id": retired}, headers=headers,
+                             json={"expected_revision": 2, "expected_editorial_version": 2, "generate": True}, timeout=5).status_code == 409
+
+
+def test_group_repair_snapshot_failure_is_observable_and_retryable(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "HOME", tmp_path); monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+    state = server.NewsState()
+    a, b = article(), article(url="https://second.example/b")
+    a["published"] = b["published"] = datetime.now(timezone.utc).isoformat()
+    original = state.stories.ingest([a,b])[0]
+    state.snapshot = dict(articles=[original], fetched_at=a["published"], desks=[{"desk": "science"}])
+    req = repair_request(state.stories, original["id"], source_urls=[b["url"]])
+    state.fetching = True
+    from agent_newsbot.library import LibraryConflict
+    with pytest.raises(LibraryConflict): state.repair_group(req)
+    assert state.stories.story(original["id"])["revision"] == 1
+    state.fetching = False
+    state.latest_path.mkdir()
+    result = state.repair_group(req)
+    assert result["snapshot_error"] and state.snapshot["total_articles"] == 2
+    events = state.stories.pending("reader")["events"]
+    state.latest_path.rmdir()
+    replay = state.repair_group(req)
+    assert replay["snapshot_error"] is None and replay["repair"] == result["repair"]
+    assert state.stories.pending("reader")["events"] == events
+    assert state.latest_path.stat().st_mode & 0o777 == 0o600
+    assert not list(state.latest_path.parent.glob(".repair-snapshot-*"))

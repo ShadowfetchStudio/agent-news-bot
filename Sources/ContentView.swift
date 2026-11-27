@@ -18,7 +18,7 @@ struct ContentView: View {
         .background(Theme.bgDeep)
         .toolbar { toolbar }
         .sheet(isPresented: $showCoverage) { CoverageView().environmentObject(engine) }
-        .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories) }
+        .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories, refreshSnapshot: engine.refreshRepairedSnapshot) }
     }
 
     private var sidebar: some View {

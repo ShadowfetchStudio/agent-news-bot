@@ -58,6 +58,7 @@ class NewsState:
                 if self.latest_path.stat().st_size > 16 * 1024 * 1024:
                     raise ValueError("Snapshot exceeds 16 MiB")
                 loaded = json.loads(self.latest_path.read_text())
+                loaded["articles"] = self.stories.reconcile_groups(loaded.get("articles", []))
                 # Restoring a snapshot must not renew its publication/observation date.
                 empty = dict(loaded, articles=[], desks=[dict(d, fresh=0) for d in loaded.get("desks", [])])
                 self.snapshot = self._keep_live_desks(loaded, empty)
@@ -138,7 +139,10 @@ class NewsState:
     def _run_refresh(self, previous: dict) -> dict:
         outcome: dict = {"state": "failed", "error": "fetch failed; inspect source and storage status"}
         try:
-            snapshot = self._keep_live_desks(previous, fetch_all(self.store))
+            fresh = fetch_all(self.store)
+            previous = dict(previous, articles=self.stories.reconcile_groups(previous.get("articles", [])))
+            fresh["articles"] = self.stories.reconcile_groups(fresh.get("articles", []))
+            snapshot = self._keep_live_desks(previous, fresh)
             tmp = self.latest_path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(snapshot, indent=2))
             tmp.chmod(0o600)
@@ -153,6 +157,29 @@ class NewsState:
                 self.fetch_job.update(outcome)
                 self.fetch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
                 self.fetching = False
+
+    def repair_group(self, change):
+        # Repairs and refresh startup serialize. A running fetch must finish first.
+        with self.lock:
+            if self.fetching: raise LibraryConflict("fetch in progress; retry the repair after completion")
+            receipt = self.stories.repair_group(change)
+            warning = None
+            try:
+                previous = dict(self.snapshot, articles=self.stories.reconcile_groups(self.snapshot.get("articles", [])))
+                empty = dict(previous, articles=[], desks=[dict(d) for d in previous.get("desks", [])])
+                self.snapshot = self._keep_live_desks(previous, empty)
+                self.snapshot["snapshot_error"] = None
+                fd, temp = tempfile.mkstemp(prefix=".repair-snapshot-", dir=self.latest_path.parent)
+                try:
+                    with os.fdopen(fd, "w") as handle:
+                        json.dump(self.snapshot, handle, indent=2); handle.flush(); os.fsync(handle.fileno())
+                    os.replace(temp, self.latest_path)
+                finally:
+                    if os.path.exists(temp): os.unlink(temp)
+            except (OSError, ValueError, sqlite3.Error):
+                warning = "Repair saved in the journal; snapshot update failed. Retry the same operation ID to refresh it."
+            self.snapshot["snapshot_error"] = warning
+            return {"repair": receipt, "snapshot_error": warning}
 
     @staticmethod
     def _story_time(item: dict, batch_time: str | None) -> datetime | None:
@@ -252,10 +279,10 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
         return hmac.compare_digest(auth.encode('utf-8'), expected_bearer.encode('utf-8')) or hmac.compare_digest(alt.encode('utf-8'), STATE.token.encode('utf-8'))
 
     def _library(self, method, parsed):
-        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/consumers"}
+        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/repairs", "/v1/consumers"}
         if parsed.path not in paths:
             self._send(404, {"error": "not found"}); return
-        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial", "/v1/consumers"}):
+        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs", "/v1/consumers"}):
             self._send(405, {"error": "method not allowed"}); return
         try:
             query = {k: v[-1] for k, v in parse_qs(parsed.query, keep_blank_values=True).items()}
@@ -270,6 +297,15 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
                 body = json.loads(raw)
                 if not isinstance(body, dict): raise ValueError("JSON object required")
             if parsed.path == "/v1/consumers": result = STATE.stories.consumer_status() if method == "GET" else STATE.stories.consumer_change(body)
+            elif parsed.path == "/v1/library/repairs":
+                if method == "POST":
+                    if query: raise ValueError("repair POST does not accept query parameters")
+                    result = STATE.repair_group(body)
+                else:
+                    if set(query) != {"operation_id"}: raise ValueError("operation_id is required")
+                    receipt = STATE.stories.repair_receipt(query["operation_id"])
+                    if receipt is None: raise LookupError("repair not found")
+                    result = {"repair": receipt}
             elif parsed.path == "/v1/library": result = STATE.stories.library(query)
             elif parsed.path == "/v1/library/settings":
                 result = STATE.stories.library_settings(body.get("kind"), body.get("name"), body.get("value"), write=method == "POST")
@@ -377,6 +413,7 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
                     "fetched_at": snap.get("fetched_at"),
                     "fetching": fetching,
                     "fetch_job": job,
+                    "snapshot_error": snap.get("snapshot_error"),
                 },
             )
             return

@@ -12,6 +12,7 @@ private struct LibraryPreference: Identifiable {
 
 struct LibraryView: View {
     let store: StoryStore
+    var refreshSnapshot: () -> String? = { nil }
     @Environment(\.dismiss) private var dismiss
     @State private var q = ""
     @State private var entity = ""
@@ -22,6 +23,7 @@ struct LibraryView: View {
     @State private var sort = "recent"
     @State private var bookmarked = false
     @State private var includeMuted = false
+    @State private var includeMerged = false
     @State private var watchName = ""
     @State private var message = ""
     @State private var busy = false
@@ -33,7 +35,7 @@ struct LibraryView: View {
     @State private var selected: String?
     private var filters: [String: String] {
         ["q": q, "entity": entity, "source": source, "desk": desk, "provider": provider, "status": status,
-         "sort": sort, "bookmarked": bookmarked ? "true" : "false", "include_muted": includeMuted ? "true" : "false"]
+         "sort": sort, "bookmarked": bookmarked ? "true" : "false", "include_muted": includeMuted ? "true" : "false", "include_merged": includeMerged ? "true" : "false"]
     }
     private var filterKey: String { filters.keys.sorted().map { $0 + "=" + filters[$0]! }.joined(separator: "|") }
     var body: some View {
@@ -55,7 +57,7 @@ struct LibraryView: View {
                 Picker("Order", selection: $sort) { Text("Recent revisions").tag("recent"); Text("Review priority").tag("priority") }
             }
             HStack {
-                Toggle("Bookmarks", isOn: $bookmarked); Toggle("Include muted sources", isOn: $includeMuted)
+                Toggle("Bookmarks", isOn: $bookmarked); Toggle("Include muted sources", isOn: $includeMuted); Toggle("Include merged history", isOn: $includeMerged)
                 Spacer()
                 Menu("Watchlists") {
                     ForEach(preferences.filter { $0.kind == "search" }) { item in
@@ -85,6 +87,7 @@ struct LibraryView: View {
                 Text("Showing \(offset + (rows.isEmpty ? 0 : 1))–\(offset + rows.count)").font(.caption)
                 Button("Next") { if let nextOffset { offset = nextOffset } }.disabled(nextOffset == nil || busy)
                 Spacer()
+                Button("Repair grouping…") { if let selected { repairID = selected } }.disabled(selected == nil)
                 Button("Open story and drafts") { if let selected { editorID = selected } }.disabled(selected == nil)
             }
         }.padding(20).frame(minWidth: 1000, minHeight: 650)
@@ -93,13 +96,17 @@ struct LibraryView: View {
         .sheet(item: Binding(get: { editorID.map { EditorSelection(id: $0) } }, set: { editorID = $0?.id }), onDismiss: { refresh += 1 }) { item in
             EditorialView(store: store, storyID: item.id) { refresh += 1 }
         }
+        .sheet(item: Binding(get: { repairID.map { EditorSelection(id: $0) } }, set: { repairID = $0?.id }), onDismiss: { refresh += 1 }) { item in
+            GroupRepairView(store: store, storyID: item.id, refreshSnapshot: refreshSnapshot)
+        }
     }
+    @State private var repairID: String?
     @State private var editorID: String?
     private struct EditorSelection: Identifiable { let id: String }
     private func apply(_ values: [String: String]) {
         q = values["q"] ?? ""; entity = values["entity"] ?? ""; source = values["source"] ?? ""
         desk = values["desk"] ?? ""; provider = values["provider"] ?? ""; status = values["status"] ?? ""
-        sort = values["sort"] ?? "recent"; bookmarked = values["bookmarked"] == "true"; includeMuted = values["include_muted"] == "true"
+        sort = values["sort"] ?? "recent"; bookmarked = values["bookmarked"] == "true"; includeMuted = values["include_muted"] == "true"; includeMerged = values["include_merged"] == "true"
     }
     private func load() async {
         do {
@@ -115,6 +122,7 @@ struct LibraryView: View {
                 return LibraryItem(id: row["id"] as? String ?? "", title: row["title"] as? String ?? "", source: row["source"] as? String ?? "",
                     status: editorial["status"] as? String ?? "unreviewed", bookmarked: editorial["bookmarked"] as? Bool ?? false, priority: row["review_priority"] as? Int ?? 0)
             }
+            if let selected, !rows.contains(where: { $0.id == selected }) { self.selected = nil }
             nextOffset = page["next_offset"] as? Int
             preferences = ((value["settings"] as? [String: Any])?["preferences"] as? [[String: Any]] ?? []).map { LibraryPreference(kind: $0["kind"] as? String ?? "", name: $0["name"] as? String ?? "", filters: $0["value"] as? [String: String] ?? [:]) }
             message = rows.isEmpty ? "No retained stories match these filters." : ""
@@ -146,6 +154,8 @@ struct EditorialView: View {
     @State private var savedFingerprint = ""
     @State private var summary = ""
     @State private var sourceURLs: [String] = []
+    @State private var groupingDetails = ""
+    @State private var retired = false
     private var fingerprint: String {
         let value: [String: Any] = ["notes": notes, "status": status, "bookmarked": bookmarked, "drafts": drafts]
         return (try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys)).map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -156,14 +166,16 @@ struct EditorialView: View {
             HStack { Text(title.isEmpty ? "Story editor" : title).font(.title3.bold()); Spacer(); Button("Done") { if dirty { pendingDiscard = "close" } else { dismiss() } } }
             HStack {
                 Text("Story revision \(revision) · draft version \(version)").font(.caption)
-                Toggle("Bookmark", isOn: $bookmarked)
-                Picker("Editorial state", selection: $status) { ForEach(LibraryModel.states.sorted(), id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }
+                Toggle("Bookmark", isOn: $bookmarked).disabled(retired)
+                Picker("Editorial state", selection: $status) { ForEach(LibraryModel.states.sorted(), id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }.disabled(retired)
             }
             Text("Approval applies only to this revision. Nothing is posted automatically.").font(.caption).foregroundStyle(.secondary)
             ForEach(quality, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
             TabView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        Text("Story ID: \(storyID)").font(.caption).textSelection(.enabled)
+                        if !groupingDetails.isEmpty { Text(groupingDetails).font(.callout).textSelection(.enabled) }
                         Text(summary.isEmpty ? "No summary was supplied by this source." : summary).textSelection(.enabled)
                         Text("Read the original sources").font(.headline)
                         ForEach(sourceURLs, id: \.self) { raw in
@@ -179,7 +191,7 @@ struct EditorialView: View {
                 draftEditor("narration", label: "Narration starter — verify and develop before recording").tabItem { Text("Narration") }
                 ScrollView { StoryHistoryView(store: store, storyID: storyID, revision: revision).padding() }.tabItem { Text("History") }
                 VStack(alignment: .leading) {
-                    Text("Research notes"); TextEditor(text: $notes)
+                    Text("Research notes"); TextEditor(text: $notes).disabled(retired)
                     ForEach(sources, id: \.self) { source in HStack { Text(source); Spacer(); Button("Mute in library") { mute(source) } } }
                 }.padding().tabItem { Text("Notes / sources") }
             }
@@ -187,10 +199,10 @@ struct EditorialView: View {
             if dirty { Text("Unsaved changes. Exports contain the last saved version.").font(.caption).foregroundStyle(.orange) }
             HStack {
                 Button("Reload saved version") { if dirty { pendingDiscard = "reload" } else { load() } }
-                Button(drafts.isEmpty ? "Generate draft templates" : "Regenerate templates…") { if drafts.isEmpty { save(generate: true) } else { confirmGenerate = true } }
+                Button(drafts.isEmpty ? "Generate draft templates" : "Regenerate templates…") { if drafts.isEmpty { save(generate: true) } else { confirmGenerate = true } }.disabled(retired)
                 Spacer()
-                Button("Export saved research package") { exportPackage() }.disabled(!loaded)
-                Button("Save changes") { save(generate: false) }.buttonStyle(.borderedProminent).disabled(!loaded)
+                Button("Export saved research package") { exportPackage() }.disabled(!loaded || retired)
+                Button("Save changes") { save(generate: false) }.buttonStyle(.borderedProminent).disabled(!loaded || retired)
             }
         }.padding(20).frame(minWidth: 850, minHeight: 660)
         .onAppear { load() }
@@ -215,7 +227,7 @@ struct EditorialView: View {
                 Text(measurement.map { "\($0["weightedLength"] as? Int ?? 0) / 280 weighted characters" } ?? "X validation unavailable").font(.caption)
             }
             if let second { Text("Description").font(.caption); TextEditor(text: Binding(get: { drafts[second] ?? "" }, set: { drafts[second] = $0 })) }
-        }.padding()
+        }.padding().disabled(retired)
     }
     private func apply(_ row: [String: Any]) {
         let state = row["editorial"] as? [String: Any] ?? [:]
@@ -224,6 +236,15 @@ struct EditorialView: View {
         notes = state["notes"] as? String ?? ""; drafts = state["drafts"] as? [String: String] ?? [:]
         quality = row["quality_notes"] as? [String] ?? []
         summary = row["summary"] as? String ?? ""
+        retired = row["merged_into"] != nil
+        var details: [String] = []
+        if let id = row["merged_into"] as? String { details.append("Retained history — merged into \(id). Drafts are read-only; use the destination for new work.") }
+        if let id = row["split_from"] as? String { details.append("Split from \(id). Earlier shared evidence remains in that story's history.") }
+        if let id = row["last_repair_id"] as? String {
+            details.append("Repair receipt: " + id)
+            if let record = try? store.repairReceipt(id), let reason = record["reason"] as? String { details.append("Reason: " + reason) }
+        }
+        groupingDetails = details.joined(separator: "\n")
         sourceURLs = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String })).sorted()
         sources = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["source"] as? String })).sorted()
         loaded = true

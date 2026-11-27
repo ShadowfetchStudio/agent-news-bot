@@ -8,7 +8,7 @@ The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found n
 
 - [x] R01: fail visibly and preserve data when native bridge credentials cannot be persisted; stable cached credential and explicit rotation.
 - [x] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
-- [ ] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
+- [x] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
 - [x] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
 - [x] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
 - [x] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
@@ -42,7 +42,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Supported private Linux config and service wiring.
 - [ ] macOS automatic refresh and restored batch.
 - [ ] Disagreement/correction timeline, multiple desks and durable story detail.
-- [ ] Manual story-group split/merge with preserved identities, event history and explicit editorial review of legacy groups.
+- [x] Manual story-group split/merge with preserved identities, event history and explicit editorial review of legacy groups.
 - [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
 - [x] Source-quality explanations without inferred factual verification.
 - [ ] YouTube/X/TikTok draft templates, editorial approval state, ranked briefs and VideoBot export.
@@ -74,7 +74,7 @@ Do not mark items complete until their behavior and required verification are re
 
 - R01: the Mac caches one persisted bridge token and fails visibly on invalid/unreadable storage. An atomic private helper preserves existing bytes, bounds lock acquisition and supports explicit reload/rotation. Native tests cover 24 concurrent creators, stale rotation, invalid/directory/symlink destinations, private mode, and a real listener rejecting the former token and accepting the new saved token.
 - R04: common HTTP(S) article validation now covers RSS/HN/digest ingestion, journal inputs, active snapshot restoration, native opening/source links, agent handoff, drafting/approval and exports. Cross-runtime fixtures include credentials, control/encoded characters, non-web schemes, invalid ports/hosts, IPv6 and IDNA. Existing raw historical events remain untrusted forensic evidence; they are not rewritten. Library warnings identify unsafe retained source links and exports reject them.
-- R03 automatic matching is repaired: distinct actors/countries, numbers, dates, locations and prepositions no longer merge through loose word overlap; equivalent wording still groups, and same-URL corrections retain identity and immutable previous events. The checkbox remains open for manual repair of legacy groups with audit history.
+- R03 automatic matching is repaired: distinct actors/countries, numbers, dates, locations and prepositions no longer merge through loose word overlap; equivalent wording still groups, and same-URL corrections retain identity and immutable previous events. The later manual-repair batch below adds explicit split/merge with audit history.
 - The eight Python runtime dependencies now have version/hash locks, PyPI metadata provenance and a CI advisory audit. Build/test toolchains are explicitly outside that lock. The checked runtime and npm audit results reported no known findings.
 - Python World Monitor now has an isolated worker, 4 MiB stream cap and a 20-second parent deadline. Real oversized-valid-JSON and trickling-server tests verify rejection and timeout child reaping. Ordinary direct providers and persistent circuit breakers remain open.
 - Final batch validation: **154 passed on macOS; 93 passed / 61 native-Mac skips on Pop!_OS**. A final encoded-authority rejection refinement passed both Mac URL fixtures and the native Linux policy fixture. The Apple Silicon app rebuilt without warnings and passed strict ad-hoc signature verification. These checks use isolated state; no production service replacement or public release was performed.
@@ -194,3 +194,15 @@ R02, the manual repair portion of R03, and direct-provider bounds in R08 remain 
 - Actual Hermes/OpenClaw executables were not found on the checked Mac or Pop!_OS PATHs; the usual Mac Hermes location was absent. Controlled protocol/UI checks are not a live model/provider acceptance. That limitation remains in the final integration gate.
 
 The manual repair portion of R03 remains open. Source backoff/circuit breakers, setup, backup/restore/retention, deeper editorial work, complete release documentation and final distributable publication remain part of the goal.
+
+## Manual grouping repair batch
+
+- Added matching Swift/Python transactional split/merge, canonical current membership, stable old IDs/aliases, immutable previous events, preserved provider observations and per-story drafts/notes, and explicit needs-review invalidation. Retired merge sources remain readable but cannot be edited/approved/exported as active work. Manual groups are excluded from automatic title matching; same-URL corrections continue.
+- Receipt IDs support exact-request idempotency. Both story and editorial versions are compared in one transaction, and conflicting retries, stale destinations, inconsistent membership and invalid inputs are rejected. A trigger-induced failure after the first event/membership writes proves full rollback, including the receipt table.
+- Added native split checkboxes, merge destination preview, reason/confirmation and durable receipt display; library inclusion of merged history; related IDs/reason in the Story tab. Added authenticated API routes and a Linux CLI applying repairs through the running localhost service. CLI receipt reads work offline.
+- Live/restore reconciliation resolves split descendants and merged destinations with cycle protection, then reapplies expiry/desk caps. Mac bridge repairs synchronously refresh the native batch. Linux repairs serialize with fetch startup and reject an in-progress fetch. Persistence failures after a committed repair are visible and retryable with the same operation ID without duplicate events.
+- Full automated verification: **219 passed on macOS; 121 passed / 98 native-Mac skips on Pop!_OS**. The app built without warnings. Additional focused checks replay receipts between runtimes. Native root/system service installation, real agents/providers and final release packaging remain separate gates.
+- Isolated Mac UI walkthrough passed a split, a merge back, library row refresh (two active rows then one), retained-history inclusion, readable source/related IDs and repair reasons, and disabled export/save for a retired group. A subsequent authenticated API split immediately returned two live stories and persisted the same batch; original research notes remained intact. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-group-ui-_n7s4elb/verification.json` and its isolated journal. The test app was stopped and its test-only preferences removed.
+- The walkthrough identified two UI refinements: clear library selections no longer present after filtering/repair, and open on All stories when a restored selected desk is disabled. Retired draft fields and editorial-state controls are disabled; the reason field has an explicit accessibility label. Final build passed without warnings and strict ad-hoc signature verification passed. Scoped UI recheck showed the restored story in the main list and both story actions disabled after filtering away the selected row; evidence is in `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-group-ui-coluguh_/verification.json`. Test app/preferences were cleaned up.
+
+This closes R03 and the manual grouping checkbox, not the broader release objective. First-run experience, ranked briefs, capabilities/errors, source resilience/replacements, backup/restore/retention/load, full keyboard/VoiceOver and optional real integrations, final icons/packages/docs/release upload remain tracked above.

@@ -32,14 +32,15 @@ enum LibraryModel {
         return result
     }
     static func query(_ query: [String: String]) throws -> (sql: String, values: [String], limit: Int, offset: Int) {
-        let allowed: Set<String> = ["q", "entity", "desk", "source", "provider", "status", "bookmarked", "include_muted", "sort", "limit", "offset"]
+        let allowed: Set<String> = ["q", "entity", "desk", "source", "provider", "status", "bookmarked", "include_muted", "include_merged", "sort", "limit", "offset"]
         guard Set(query.keys).isSubset(of: allowed), query.values.allSatisfy({ $0.unicodeScalars.count <= 300 }),
               let limit = Int(query["limit"] ?? "50"), (1...100).contains(limit), let offset = Int(query["offset"] ?? "0"), (0...100000).contains(offset),
               ["recent", "priority"].contains(query["sort"] ?? "recent") else { throw LibraryFailure.invalid("invalid library filter or pagination") }
-        guard ["bookmarked", "include_muted"].allSatisfy({ ["true", "false"].contains(query[$0] ?? "false") }) else {
+        guard ["bookmarked", "include_muted", "include_merged"].allSatisfy({ ["true", "false"].contains(query[$0] ?? "false") }) else {
             throw LibraryFailure.invalid("boolean filters must be true or false")
         }
         var clauses = ["1=1"], values: [String] = []
+        if query["include_merged"] != "true" { clauses.append("json_extract(s.payload,'$.merged_into') IS NULL") }
         for key in ["q", "entity"] { if let value = query[key], !value.isEmpty {
             clauses.append("instr(lower(coalesce(json_extract(s.payload,'$.title'),'') || ' ' || coalesce(json_extract(s.payload,'$.summary'),'') || ' ' || coalesce(json_extract(s.payload,'$.sources'),'')),lower(?))>0"); values.append(value)
         } }
@@ -87,6 +88,7 @@ extension StoryStore {
         return try withDB { db in
             guard let row = try run(db, "SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", [id,id]).first else { throw LibraryFailure.missing }
             let story = try decode(row[0]), sid = row[1], revision = story["revision"] as? Int ?? 0
+            guard story["merged_into"] == nil else { throw LibraryFailure.conflict("story was merged; edit its destination instead") }
             guard let expected = change["expected_revision"] as? NSNumber, CFGetTypeID(expected) != CFBooleanGetTypeID(), expected.intValue == revision,
                   !["d", "f"].contains(String(cString: expected.objCType)), expected.doubleValue == Double(revision) else { throw LibraryFailure.conflict("story changed; reload before saving") }
             let raw = try run(db, "SELECT payload FROM editorial WHERE story_id=?", [sid]).first.map { try decode($0[0]) } ?? [:]
@@ -155,6 +157,7 @@ extension StoryStore {
     }
     func researchExport(_ id: String) throws -> [String: Any] {
         guard let story = try editorial(id) else { throw LibraryFailure.missing }
+        guard story["merged_into"] == nil else { throw LibraryFailure.conflict("story was merged; export its destination instead") }
         do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; export is disabled.") }
         var seen = Set<String>()
         var urls = (story["sources"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }.filter { seen.insert($0).inserted }

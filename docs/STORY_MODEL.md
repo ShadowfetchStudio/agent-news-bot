@@ -70,3 +70,7 @@ body retains its original observation time for undated entries.
 Invalid feed documents are rejected. Native Atom parsing chooses the alternate article link,
 preserves nested summary text, ignores nested source titles, and disables external entity loading.
 Freshness database connections are closed after each Python operation.
+
+## Group repair events
+
+`group_repaired` revisions are explicit editorial regroupings. Split children link to their parent; merged source records remain addressable with `merged_into`. Consumers must follow the destination for active work and retain their original event identities for replay. See [group repair preservation and delivery semantics](GROUP_REPAIRS.md).

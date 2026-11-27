@@ -18,12 +18,16 @@ def main(argv: list[str] | None = None) -> int:
         library.add_argument("--" + name)
     library.add_argument("--bookmarked", action="store_true")
     library.add_argument("--include-muted", action="store_true")
+    library.add_argument("--include-merged", action="store_true")
     editorial = sub.add_parser("editorial", help="Read editorial state or save an explicit revision-bound change file")
     editorial.add_argument("id"); editorial.add_argument("--changes")
     preferences = sub.add_parser("preferences", help="List watchlists/mutes or apply a JSON preference change")
     preferences.add_argument("--changes")
     consumers = sub.add_parser("consumers", help="Show backlog/leases or apply an explicit consumer administration command")
     consumers.add_argument("--changes")
+    repairs = sub.add_parser("repairs", help="Apply a grouping repair through the running localhost service, or read a saved receipt")
+    repair_choice = repairs.add_mutually_exclusive_group(required=True)
+    repair_choice.add_argument("--changes"); repair_choice.add_argument("--receipt")
     export = sub.add_parser("export-research", help="Export saved drafts, provenance and VideoBot source URLs")
     export.add_argument("id"); export.add_argument("--destination", required=True)
     args = parser.parse_args(argv)
@@ -45,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd in ("library", "editorial", "preferences", "export-research", "consumers"):
+    if args.cmd in ("library", "editorial", "preferences", "export-research", "consumers", "repairs"):
         from pathlib import Path
         import sqlite3
         from .config import HOME
@@ -63,9 +67,33 @@ def main(argv: list[str] | None = None) -> int:
                 if not isinstance(change, dict): raise ValueError("change file must be a JSON object")
             if args.cmd == "library":
                 query = {k: str(v) for k, v in vars(args).items() if k != "cmd" and v is not None and not isinstance(v, bool)}
-                for key in ("bookmarked", "include_muted"):
+                for key in ("bookmarked", "include_muted", "include_merged"):
                     if getattr(args, key): query[key] = "true"
                 result = journal.library(query)
+            elif args.cmd == "repairs":
+                if args.receipt:
+                    result = journal.repair_receipt(args.receipt)
+                    if result is None: raise LookupError("repair not found")
+                else:
+                    # The running service updates its visible batch as part of the repair.
+                    # No direct offline mutation can leave a live server with stale groups.
+                    import http.client
+                    from .config import PORT
+                    from .group_repairs import validate_request
+                    validate_request(change)
+                    token = (HOME / "export" / "bridge.token").read_text().strip()
+                    connection = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+                    try:
+                        connection.request("POST", "/v1/library/repairs", json.dumps(change),
+                                           {"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+                        response = connection.getresponse()
+                        raw = response.read(4 * 1024 * 1024 + 1)
+                        if len(raw) > 4 * 1024 * 1024: raise ValueError("repair response too large; inspect the saved receipt")
+                        result = json.loads(raw)
+                        if response.status != 200: raise ValueError(result.get("error", "repair request failed"))
+                    except (OSError, http.client.HTTPException) as exc:
+                        raise ValueError("Repair service unavailable or connection interrupted. Start the service, check the operation receipt, then retry the SAME change file.") from exc
+                    finally: connection.close()
             elif args.cmd == "editorial":
                 result = journal.save_editorial(args.id, change) if change is not None else journal.editorial(args.id)
                 if result is None: raise LookupError("story not found")

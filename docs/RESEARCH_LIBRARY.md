@@ -40,7 +40,7 @@ Use the same bearer token as other bridge routes. All JSON responses are objects
 
 | Route | Method | Contract |
 |---|---|---|
-| `/v1/library` | GET | `q`, `entity`, `desk`, `source`, `provider`, `status`, `bookmarked`, `include_muted`, `sort`, `limit`, `offset` |
+| `/v1/library` | GET | `q`, `entity`, `desk`, `source`, `provider`, `status`, `bookmarked`, `include_muted`, `include_merged`, `sort`, `limit`, `offset` |
 | `/v1/library/settings` | GET | Saved preferences under `preferences` |
 | `/v1/library/settings` | POST | `{kind: "search" or "mute", name, value}`; null deletes; searches store filter objects; mutes use true |
 | `/v1/library/editorial?id=ID` | GET | `story` object with `editorial`, `review_priority`, `quality_notes` |
@@ -80,3 +80,7 @@ Example `watchlist.json`:
 ```
 
 The CLI reads/writes the same SQLite journal as the service and applies the same concurrency and validation rules. It can run from outside the checkout when installed.
+
+## Manual grouping repairs
+
+Select **Repair grouping…** to split source reports or merge into a previewed destination. **Include merged history** exposes retained old IDs and drafts; they cannot be exported as active stories. The Story tab shows IDs, repair reasons and related IDs. See [the complete repair contract, API and CLI](GROUP_REPAIRS.md).

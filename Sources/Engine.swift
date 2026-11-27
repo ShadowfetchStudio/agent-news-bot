@@ -102,10 +102,14 @@ final class NewsEngine: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+        if let selectedDesk, !settings.enabledDesks.contains(selectedDesk) { self.selectedDesk = nil }
         restoreSnapshot()
         settings.save()
         let snap = snapshot
         bridge.stories = stories
+        bridge.groupRepairHandler = { [weak self] in
+            DispatchQueue.main.sync { self?.refreshRepairedSnapshot() }
+        }
         bridge.articlesProvider = { snap.readArticles() }
         bridge.desksProvider = { snap.readDesks() }
         bridge.statusProvider = { snap.readStatus() }
@@ -126,13 +130,34 @@ final class NewsEngine: ObservableObject {
             guard size <= 16 * 1024 * 1024 else { throw StoryStore.Failure.database }
             let data = try Data(contentsOf: url)
             guard data.count <= 16 * 1024 * 1024,
-                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw StoryStore.Failure.database }
+                  var payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw StoryStore.Failure.database }
+            payload["articles"] = try stories.reconcileGroups(payload["articles"] as? [[String: Any]] ?? [])
             let restored = SnapshotPolicy.restore(payload, lookback: settings.lookbackHours, enabled: settings.enabledDesks, limit: settings.maxPerDesk)
             articles = restored.articles; desks = restored.desks; selected = articles.first
             coverageState = Coverage.summary(desks.flatMap(\.coverageChecks))["state"] as? String ?? "unknown"
             snapshot.update(articles: articles, desks: desks, fetchedAt: restored.fetchedAt)
             status = "Restored \(articles.count) stories. Source checks are from the previous session."
         } catch { status = "Saved snapshot could not be restored. The story journal is unchanged; fetch again." }
+    }
+
+    @discardableResult func refreshRepairedSnapshot() -> String? {
+        do {
+            let current = try stories.reconcileGroups(articles.map(\.wire)).map { try Article.fromWire($0) }
+            articles = SnapshotPolicy.merge(previous: current, fresh: [],
+                previousFetchedAt: snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse), lookback: settings.lookbackHours,
+                enabled: settings.enabledDesks, limit: settings.maxPerDesk)
+            for i in desks.indices { desks[i].articles = articles.filter { $0.displayDesks.contains(desks[i].desk) } }
+            selected = articles.first { $0.id == selected?.id } ?? articles.first
+            let fetchedAt = snapshot.readStatus().fetchedAt
+            snapshot.update(articles: articles, desks: desks, fetchedAt: fetchedAt)
+            if let fetchedAt, !persistSnapshot(fetchedAt: fetchedAt) { return snapshotError }
+            status = "Story groups repaired. Review affected drafts before approval."
+            return nil
+        } catch {
+            let message = "Repair saved in the journal, but the visible snapshot could not be refreshed. Reload the app to retry."
+            status = message; snapshotError = message; snapshot.setPersistenceError(message)
+            return message
+        }
     }
 
     func configureAutomaticRefresh() {
@@ -239,7 +264,10 @@ final class NewsEngine: ObservableObject {
             store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
         }
         let changedCount = merged.count
-        merged = SnapshotPolicy.merge(previous: articles, fresh: merged,
+        let current: [Article]
+        do { current = try stories.reconcileGroups(articles.map(\.wire)).map { try Article.fromWire($0) } }
+        catch { status = "Could not reconcile repaired groups; the story journal is preserved."; return }
+        merged = SnapshotPolicy.merge(previous: current, fresh: merged,
             previousFetchedAt: snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse), lookback: lookback,
             enabled: enabled, limit: maxItems)
         for i in results.indices { results[i].articles = merged.filter { $0.displayDesks.contains(results[i].desk) } }

@@ -161,6 +161,14 @@ import Security
         if args[1] == "library-op" {
             let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[3]))) as! [String: Any]
             switch value["op"] as? String {
+            case "repair":
+                do { try output(try store.repairGroup(value["change"] as! [String: Any])) }
+                catch LibraryFailure.conflict(let message) { try output(["error": "conflict", "message": message]) }
+                catch LibraryFailure.invalid(let message) { try output(["error": "invalid", "message": message]) }
+                catch LibraryFailure.missing { try output(["error": "missing"]) }
+                catch { try output(["error": "storage"]) }
+            case "repair-receipt": try output(try store.repairReceipt(value["id"] as! String) ?? [:])
+            case "reconcile-groups": try output(["stories": store.reconcileGroups(value["stories"] as! [[String: Any]])])
             case "search": try output(try store.library(value["query"] as? [String: String] ?? [:]))
             case "save": try output(try store.saveEditorial(value["id"] as! String, change: value["change"] as! [String: Any]))
             case "settings": try output(try store.librarySettings(kind: value["kind"] as? String, name: value["name"] as? String, value: value["value"], write: value["write"] as? Bool ?? false))

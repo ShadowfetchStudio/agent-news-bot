@@ -42,15 +42,16 @@ def decorate(story, editorial):
 
 
 def query_sql(query):
-    allowed = {"q", "entity", "desk", "source", "provider", "status", "bookmarked", "include_muted", "sort", "limit", "offset"}
+    allowed = {"q", "entity", "desk", "source", "provider", "status", "bookmarked", "include_muted", "include_merged", "sort", "limit", "offset"}
     if set(query) - allowed or any(not isinstance(v, str) or len(v) > 300 for v in query.values()):
         raise ValueError("invalid library filter")
     limit, offset = int(query.get("limit", "50")), int(query.get("offset", "0"))
     if not 1 <= limit <= 100 or not 0 <= offset <= 100000: raise ValueError("invalid library pagination")
     if query.get("sort", "recent") not in ("recent", "priority"): raise ValueError("invalid sort")
-    if any(query.get(k, "false") not in ("true", "false") for k in ("bookmarked", "include_muted")):
+    if any(query.get(k, "false") not in ("true", "false") for k in ("bookmarked", "include_muted", "include_merged")):
         raise ValueError("boolean filters must be true or false")
     clauses, values = ["1=1"], []
+    if query.get("include_merged") != "true": clauses.append("json_extract(s.payload,'$.merged_into') IS NULL")
     for key in ("q", "entity"):
         if query.get(key):
             clauses.append("instr(lower(coalesce(json_extract(s.payload,'$.title'),'') || ' ' || coalesce(json_extract(s.payload,'$.summary'),'') || ' ' || coalesce(json_extract(s.payload,'$.sources'),'')),lower(?))>0")
@@ -98,6 +99,7 @@ class LibraryMixin:
             row = db.execute("SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", (story_id, story_id)).fetchone()
             if not row: raise LookupError("story not found")
             story, sid = json.loads(row[0]), row[1]
+            if story.get("merged_into"): raise LibraryConflict("story was merged; edit its destination instead")
             if type(change.get("expected_revision")) is not int or change["expected_revision"] != story["revision"]: raise LibraryConflict("story changed; reload before saving")
             raw = db.execute("SELECT payload FROM editorial WHERE story_id=?", (sid,)).fetchone()
             state = decorate(story, json.loads(raw[0]) if raw else {})["editorial"]
@@ -149,6 +151,7 @@ class LibraryMixin:
         story = self.editorial(story_id)
         if story is None: raise LookupError("story not found")
         require_safe_story(story)
+        if story.get("merged_into"): raise LibraryConflict("story was merged; export its destination instead")
         urls = list(dict.fromkeys(s["url"] for s in story.get("sources", []))) or [story["url"]]
         return {"schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": story["editorial"]["status"] == "approved", "source_urls": urls,

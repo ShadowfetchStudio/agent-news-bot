@@ -27,6 +27,7 @@ final class AgentBridge: @unchecked Sendable {
     var statusProvider: () -> BridgeStatusSnapshot = { BridgeStatusSnapshot(fresh: 0, fetchedAt: nil, fetching: false) }
     var stories: StoryStore?
     var fetchHandler: (() async throws -> Int)?
+    var groupRepairHandler: (() -> String?)?
 
     var endpoint: String { "http://127.0.0.1:\(port)" }
 
@@ -320,11 +321,20 @@ final class AgentBridge: @unchecked Sendable {
 
     private func libraryResponse(_ path: String, method: String, query: [String: String], body: [String: Any]) -> (Int, Data) {
         guard let stories else { return json(503, ["error": "story storage unavailable"]) }
-        let allowed = ["/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export"]
+        let allowed = ["/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/repairs"]
         guard allowed.contains(path) else { return json(404, ["error": "not found"]) }
-        guard method == "GET" || (method == "POST" && ["/v1/library/settings", "/v1/library/editorial"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
+        guard method == "GET" || (method == "POST" && ["/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
         do {
             switch path {
+            case "/v1/library/repairs":
+                if method == "POST" {
+                    guard query.isEmpty else { throw LibraryFailure.invalid("repair POST does not accept query parameters") }
+                    let receipt = try stories.repairGroup(body)
+                    return json(200, ["repair": receipt, "snapshot_error": groupRepairHandler?() ?? NSNull()])
+                }
+                guard Set(query.keys) == ["operation_id"] else { throw LibraryFailure.invalid("operation_id is required") }
+                guard let receipt = try stories.repairReceipt(query["operation_id"] ?? "") else { throw LibraryFailure.missing }
+                return json(200, ["repair": receipt])
             case "/v1/library": return json(200, try stories.library(query))
             case "/v1/library/settings": return json(200, try stories.librarySettings(kind: body["kind"] as? String, name: body["name"] as? String, value: body["value"], write: method == "POST"))
             case "/v1/library/export": return json(200, try stories.researchExport(query["id"] ?? ""))

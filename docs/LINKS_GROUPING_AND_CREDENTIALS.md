@@ -18,7 +18,7 @@ Different URLs are automatically grouped only when their ordered substantive hea
 
 The previous 72% token-overlap rule is no longer sufficient to merge identities. Different actors (NASA/China), countries (US/UK), dates, locations, magnitudes and travel directions remain separate. Uncertain paraphrases may also remain separate; this is preferable to silently attributing one event's evidence to another.
 
-New groups carry `grouping_policy: equivalent-wording-v1`. Older groups encountered during ingestion carry `legacy-title-overlap` unless already labeled. Old groups and immutable events are not automatically split or reassigned. Manual split/merge with a durable audit trail remains on the release checklist. The inspector explicitly warns that older groups may have used broader similarity matching.
+New groups carry `grouping_policy: equivalent-wording-v1`. Older groups encountered during ingestion carry `legacy-title-overlap` unless already labeled. Old groups and immutable events are not automatically split or reassigned. Explicit [manual split/merge](GROUP_REPAIRS.md) preserves old identities, immutable events, provider observations and drafts, records a durable receipt and requires editorial review again. Repaired groups are locked against automatic title matching; existing URLs still receive corrections. The inspector explicitly warns that older groups may have used broader similarity matching.
 
 ## Native bridge credentials
 

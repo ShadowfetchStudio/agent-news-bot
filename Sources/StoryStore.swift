@@ -31,6 +31,7 @@ final class StoryStore: @unchecked Sendable {
             "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
         ] { try run(db, sql) }
         try run(db, ConsumerSchema.sql)
+        try run(db, "CREATE TABLE IF NOT EXISTS group_repairs(id TEXT PRIMARY KEY,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)")
         try run(db, "BEGIN IMMEDIATE")
         do {
             if try run(db, "SELECT 1 FROM migrations WHERE name='canonical-v2'").isEmpty {
@@ -92,7 +93,7 @@ final class StoryStore: @unchecked Sendable {
                 "context": Dictionary(uniqueKeysWithValues: contextFields.map { ($0, metadata[$0] ?? NSNull()) })]
         }])
     }
-    private func disagree(_ sources: [[String: Any]]) -> Bool {
+    func disagree(_ sources: [[String: Any]]) -> Bool {
         let negative: Set<String> = ["not", "never", "no", "cancel", "cancels", "cancelled", "canceled", "denies", "rejected"]
         for source in sources {
             let observations = source["observations"] as? [String: [String: Any]] ?? [:]
@@ -142,7 +143,7 @@ final class StoryStore: @unchecked Sendable {
                 if old == nil && !special.contains(article.desk.rawValue) {
                     for row in try run(db, "SELECT payload FROM stories WHERE updated>=? ORDER BY updated DESC LIMIT 500", [String(now.timeIntervalSince1970 - 48*3600)]) {
                         let candidate = try decode(row[0])
-                        if special.contains(candidate["desk"] as? String ?? "") { continue }
+                        if candidate["grouping_locked"] as? Bool == true || candidate["merged_into"] != nil || special.contains(candidate["desk"] as? String ?? "") { continue }
                         if FreshnessStore.canGroupTitles(article.title, candidate["title"] as? String ?? "") { old = candidate; break }
                     }
                 }
