@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -1096,6 +1096,84 @@ def test_library_cli_from_other_directory_and_conflict(tmp_path):
     changes.write_text('[]')
     invalid = cli('preferences', '--changes', str(changes))
     assert invalid.returncode == 1 and 'JSON object' in invalid.stderr
+    changes.write_text(json.dumps({'consumer':'cli-reader','action':'create','start':'now'}))
+    created = cli('consumers', '--changes', str(changes))
+    assert created.returncode == 0 and json.loads(created.stdout)['generation'] == 1
+    assert json.loads(cli('consumers').stdout)['consumers'][0]['lag'] == 0
+    assert cli('consumers', '--changes', str(changes)).returncode == 1
     (home / 'stories.sqlite').write_bytes(b'invalid sqlite file')
     broken = cli('library')
     assert broken.returncode == 1 and 'Traceback' not in broken.stderr
+
+
+@pytest.mark.parametrize('runtime', ['python', 'swift'])
+def test_consumer_controls_fence_replay_and_worker_leases(runtime, request, tmp_path, monkeypatch):
+    import sqlite3
+    with contextlib.ExitStack() as stack:
+        rows = [article('https://example.com/' + str(i), 'Distinct story ' + str(i) + ' ' + ('ocean' if i==0 else 'election' if i==1 else 'space')) for i in range(3)]
+        db = tmp_path / 'stories.sqlite'
+        if runtime == 'swift':
+            binary = request.getfixturevalue('swift_harness')
+            data = tmp_path / 'rows.json'; data.write_text(json.dumps(rows))
+            swift(binary, 'ingest', db, data)
+            base, _ = stack.enter_context(native_bridge(binary, db)); token = 'integration-test-token'
+        else:
+            monkeypatch.setattr(server, 'HOME', tmp_path); monkeypatch.setattr(server, 'SHARED', tmp_path/'shared')
+            state = server.NewsState(); monkeypatch.setattr(server, 'STATE', state); state.stories.ingest(rows)
+            httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+            def stop(): httpd.shutdown(); httpd.server_close(); thread.join()
+            stack.callback(stop); base=f'http://127.0.0.1:{httpd.server_port}'; token=state.token
+        headers={'Authorization':'Bearer '+token}
+        with sqlite3.connect(db) as conn:
+            assert conn.execute('SELECT count(*) FROM events').fetchone()[0] == 3
+            for seq in range(1,4):
+                payload=json.loads(conn.execute('SELECT payload FROM events WHERE seq=?',(seq,)).fetchone()[0])
+                payload['updated_at']=f'2026-01-0{seq}T12:00:00Z'
+                conn.execute('UPDATE events SET payload=? WHERE seq=?',(json.dumps(payload),seq))
+        def change(action, expected=0, **other):
+            return requests.post(base+'/v1/consumers',headers=headers,json=dict(consumer='worker',action=action,expected_generation=expected,**other),timeout=5)
+        def pending(lease=None, **extra):
+            return requests.get(base+'/v1/events',headers=dict(headers,**({'X-Consumer-Lease':lease} if lease else {})),params=dict(consumer='worker',**extra),timeout=5)
+        def ack(gen=None, lease=None, through=3):
+            params={'consumer':'worker','through':through}
+            if gen is not None: params['generation']=gen
+            return requests.post(base+'/v1/events/ack',headers=dict(headers,**({'X-Consumer-Lease':lease} if lease else {})),params=params,timeout=5)
+        assert requests.get(base+'/v1/consumers',timeout=5).status_code==401
+        assert change('create',start='history').json()['generation']==1
+        assert change('create',start='now').status_code==409
+        assert pending(desk='science').status_code==400
+        assert pending().json()['count']==3
+        assert ack().status_code==409
+        assert ack(1).json()['cursor']==3
+        status=requests.get(base+'/v1/consumers',headers=headers,timeout=5).json()['consumers'][0]
+        assert status['lag']==0 and status['last_ack_at']>0
+        assert change('reset',expected=1,start='history').json()['generation']==2
+        assert ack(1).status_code==409
+        assert pending().json()['count']==3
+        acquired=change('lease',expected=2,worker='process-a',ttl_seconds=10)
+        assert acquired.status_code==200, acquired.text
+        lease=acquired.json()['lease']; assert acquired.json()['generation']==3
+        assert ack(3,lease).status_code==400  # old offered range was fenced out
+        assert pending().status_code==409
+        assert pending('wrong').status_code==409
+        assert pending(lease).json()['generation']==3
+        assert change('lease',expected=3,worker='process-b').status_code==409
+        assert change('reset',expected=3,start='now').status_code==409
+        assert change('renew',expected=3,lease=lease,ttl_seconds=20).json()['lease']==lease
+        assert ack(3,lease).status_code==200
+        public=requests.get(base+'/v1/consumers',headers=headers,timeout=5).text
+        assert lease not in public and 'process-a' in public
+        assert change('release',expected=3,lease=lease).json()['generation']==4
+        assert ack(3,lease).status_code==409
+        new=change('lease',expected=4,worker='process-b').json()
+        assert new['generation']==5
+        with sqlite3.connect(db) as conn: conn.execute('UPDATE consumer_meta SET lease_until=0 WHERE name=?',('worker',))
+        assert pending(new['lease']).status_code==409
+        assert change('renew',expected=5,lease=new['lease']).status_code==409
+        assert change('reset',expected=5,start='date',since='2026-01-02T12:00:00Z').json()['cursor']==1
+        assert pending().json()['count']==2
+        assert change('reset',expected=6,start='date',since='not-a-date').status_code==400
+        assert change('reset',expected=6,start='now').json()['cursor']==3
+        assert pending().json()['count']==0
+        assert change('reset',expected=6,start='history').status_code==409

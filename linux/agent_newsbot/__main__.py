@@ -21,6 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     editorial.add_argument("id"); editorial.add_argument("--changes")
     preferences = sub.add_parser("preferences", help="List watchlists/mutes or apply a JSON preference change")
     preferences.add_argument("--changes")
+    consumers = sub.add_parser("consumers", help="Show backlog/leases or apply an explicit consumer administration command")
+    consumers.add_argument("--changes")
     export = sub.add_parser("export-research", help="Export saved drafts, provenance and VideoBot source URLs")
     export.add_argument("id"); export.add_argument("--destination", required=True)
     args = parser.parse_args(argv)
@@ -41,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd in ("library", "editorial", "preferences", "export-research"):
+    if args.cmd in ("library", "editorial", "preferences", "export-research", "consumers"):
         from pathlib import Path
         import sqlite3
         from .config import HOME
@@ -67,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
                 if result is None: raise LookupError("story not found")
             elif args.cmd == "preferences":
                 result = journal.library_settings(change.get("kind"), change.get("name"), change.get("value"), write=True) if change is not None else journal.library_settings()
+            elif args.cmd == "consumers":
+                result = journal.consumer_change(change) if change is not None else journal.consumer_status()
             else:
                 result = {"folder": str(write_package(journal.research_export(args.id), args.destination))}
             json.dump(result, sys.stdout, indent=2); sys.stdout.write("\n"); return 0

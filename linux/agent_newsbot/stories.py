@@ -12,6 +12,8 @@ from pathlib import Path
 from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
+from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
+import time
 
 
 def encoded(value):
@@ -57,7 +59,7 @@ def reports_disagree(sources):
     return False
 
 
-class StoryStore(LibraryMixin):
+class StoryStore(LibraryMixin, ConsumerMixin):
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,6 +77,7 @@ class StoryStore(LibraryMixin):
             ''')
 
             for sql in SCHEMA: db.execute(sql)
+            db.execute(CONSUMER_SCHEMA)
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM migrations WHERE name='canonical-v2'").fetchone():
                 for url, story_id in db.execute("SELECT url,story_id FROM members ORDER BY url").fetchall():
@@ -204,27 +207,30 @@ class StoryStore(LibraryMixin):
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name):
             raise ValueError("consumer must be 1-64 letters, digits, dots, underscores or hyphens")
 
-    def pending(self, consumer: str, limit: int = 100) -> dict:
+    def pending(self, consumer: str, limit: int = 100, lease=None) -> dict:
         self.validate_consumer(consumer)
         if not 1 <= limit <= 500:
             raise ValueError("limit must be 1-500")
         with self.lock, self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT OR IGNORE INTO consumers(name) VALUES (?)", (consumer,))
+            generation = delivery_guard(db, consumer, lease=lease)
             cursor, offered = db.execute("SELECT cursor,offered FROM consumers WHERE name=?", (consumer,)).fetchone()
             rows = db.execute("SELECT seq,payload FROM events WHERE seq>? ORDER BY seq LIMIT ?", (cursor, limit)).fetchall()
             end = rows[-1][0] if rows else cursor
             db.execute("UPDATE consumers SET offered=? WHERE name=?", (max(offered, end), consumer))
             events = [{"seq": seq, "story": json.loads(payload)} for seq, payload in rows]
-            return {"consumer": consumer, "cursor": cursor, "next_cursor": end, "count": len(events), "events": events}
+            return {"consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": len(events), "events": events}
 
-    def acknowledge(self, consumer: str, through: int) -> dict:
+    def acknowledge(self, consumer: str, through: int, generation=None, lease=None) -> dict:
         self.validate_consumer(consumer)
         with self.lock, self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            generation = delivery_guard(db, consumer, generation, lease, ack=True)
             row = db.execute("SELECT cursor,offered FROM consumers WHERE name=?", (consumer,)).fetchone()
             if row is None or through < 0 or through > row[1]:
                 raise ValueError("cannot acknowledge events not delivered to this consumer")
             cursor = max(row[0], through)
             db.execute("UPDATE consumers SET cursor=? WHERE name=?", (cursor, consumer))
-            return {"consumer": consumer, "cursor": cursor}
+            db.execute("UPDATE consumer_meta SET last_ack=? WHERE name=?", (time.time(), consumer))
+            return {"consumer": consumer, "cursor": cursor, "generation": generation}

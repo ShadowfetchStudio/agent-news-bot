@@ -140,6 +140,8 @@ updates; stable context/provenance produces enrichment events. Score/count/time-
 current state without event spam. New substantive observations can replace older headlines while
 alternate reports remain visible. Multiple desk memberships and disagreement flags aid review.
 See [the story model and migration contract](docs/STORY_MODEL.md) for selection rules and limitations.
+
+Consumer recovery now includes backlog/acknowledgement status, history/date/now starting points, explicit replay and optional worker leases. Event responses carry a generation to fence stale acknowledgements after resets. See [consumer recovery and the idempotent reference worker](docs/CONSUMER_RECOVERY.md) before using these controls with an existing automation.
 Stories and events currently remain until explicitly managed; automated retention is a release task.
 
 `GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.

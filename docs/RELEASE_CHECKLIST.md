@@ -33,7 +33,7 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 ## Automation and maintenance
 
 - [x] Durable story lookup, revision differences, source/provider filters.
-- [ ] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases.
+- [x] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases (API and Linux CLI).
 - [ ] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [ ] Feed coverage/last-success/backoff, verified replacement sources.
 - [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
@@ -117,3 +117,13 @@ Latest native validation: 101 tests passed; the Apple Silicon app built without 
 - The UI check identified two extra issues now addressed: editor lacked original story evidence; returning from an editor could leave old row status. Added Story tab and reload-on-dismiss. A failed bridge bind now shows Offline in the sidebar instead of a misleading default URL.
 - Full automated validation: **110 passed on macOS**, **65 passed / 45 native-Mac skips on Pop!_OS**. Includes actual HTTP auth/validation/conflict tests in both runtimes, private non-overwriting file exports, and CLI from outside checkout with corrupted-journal error handling. Native build passed without warnings. The final UI-only reload-on-dismiss/offline-label adjustment is followed by a separate build/signature check.
 - Still open within the larger editorial checkbox: ranked briefing output beyond story priority. Source timeline is implemented and tested at API level; its native expanded-history interaction remains part of final GUI acceptance. Wider setup, consumer controls, maintenance, real integrations and final release remain open.
+
+## Consumer recovery batch
+
+- Added per-consumer backlog, highest offered position, last acknowledgement time and generation; explicit history/date/now onboarding and reset; optional 10–300 second exclusive worker leases with renewal/release/expiry.
+- Reset, acquisition and release fence older workers by advancing generation and clearing old offered ranges. Active leases require the matching token for reads/acks. Status never exposes tokens. Legacy generation-zero clients retain their old contract until explicitly reconfigured.
+- Unknown event filters now fail instead of implying delivery of a filtered subset. Date onboarding selects a start sequence and delivers the full suffix; no hidden gaps can be acknowledged.
+- Added a foreground reference consumer with bounded retries and private transactional SQLite inbox. Tests simulate a crash after commit/before ack, prove replay idempotency, reject changed event identities and prevent ack after failed writes. It does not perform external publishing; downstream side effects require their own idempotency/outbox contract.
+- Real HTTP tests on Swift/Python cover create/reset, stale generation, missing generation, prior offered-range invalidation, competing leases, renew/release, expiry, date start and status privacy. Wider versioned capability/error discovery and full native automation UI remain open.
+
+Consumer batch validation: full Mac integration suite **112 passed**, plus **3 passed** for the newly added reference-consumer tests; native Pop!_OS full suite **69 passed / 46 native-Mac skips**. The Apple Silicon app built without warnings and passed strict ad-hoc signature verification. A separate CLI regression checks administration from outside the checkout. These remain development builds; release packaging, authenticated provider/real agent acceptance and publication are still pending.

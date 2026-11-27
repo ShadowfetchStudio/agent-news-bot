@@ -29,6 +29,7 @@ final class StoryStore: @unchecked Sendable {
             "CREATE TABLE IF NOT EXISTS editorial(story_id TEXT PRIMARY KEY,payload TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
         ] { try run(db, sql) }
+        try run(db, ConsumerSchema.sql)
         try run(db, "BEGIN IMMEDIATE")
         do {
             if try run(db, "SELECT 1 FROM migrations WHERE name='canonical-v2'").isEmpty {
@@ -256,31 +257,34 @@ final class StoryStore: @unchecked Sendable {
             return Array(result.suffix(limit))
         }
     }
-    private func validate(_ consumer: String) throws {
+    func validate(_ consumer: String) throws {
         guard consumer.range(of: "^[A-Za-z0-9_.-]{1,64}$", options: .regularExpression) == consumer.startIndex..<consumer.endIndex else { throw Failure.invalidConsumer }
     }
-    func pending(consumer: String, limit: Int = 100) throws -> [String: Any] {
+    func pending(consumer: String, limit: Int = 100, lease: String? = nil) throws -> [String: Any] {
         try validate(consumer)
         guard (1...500).contains(limit) else { throw Failure.invalidLimit }
         return try withDB { db in
             try run(db, "INSERT OR IGNORE INTO consumers(name) VALUES (?)", [consumer])
+            let generation = try deliveryGuard(db, consumer: consumer, lease: lease)
             let row = try run(db, "SELECT cursor,offered FROM consumers WHERE name=?", [consumer])[0]
             let cursor = Int(row[0]) ?? 0, offered = Int(row[1]) ?? 0
             let rows = try run(db, "SELECT seq,payload FROM events WHERE seq>? ORDER BY seq LIMIT ?", [String(cursor), String(limit)])
             let end = rows.last.flatMap { Int($0[0]) } ?? cursor
             try run(db, "UPDATE consumers SET offered=? WHERE name=?", [String(max(offered, end)), consumer])
             let events: [[String: Any]] = try rows.map { ["seq": Int($0[0]) ?? 0, "story": try decode($0[1])] }
-            return ["consumer": consumer, "cursor": cursor, "next_cursor": end, "count": events.count, "events": events]
+            return ["consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": events.count, "events": events]
         }
     }
-    func acknowledge(consumer: String, through: Int) throws -> [String: Any] {
+    func acknowledge(consumer: String, through: Int, generation: Int? = nil, lease: String? = nil) throws -> [String: Any] {
         try validate(consumer)
         return try withDB { db in
+            let generation = try deliveryGuard(db, consumer: consumer, generation: generation, lease: lease, ack: true)
             guard let row = try run(db, "SELECT cursor,offered FROM consumers WHERE name=?", [consumer]).first,
                   through >= 0, through <= (Int(row[1]) ?? 0) else { throw Failure.invalidAcknowledgement }
             let cursor = max(Int(row[0]) ?? 0, through)
             try run(db, "UPDATE consumers SET cursor=? WHERE name=?", [String(cursor), consumer])
-            return ["consumer": consumer, "cursor": cursor]
+            try run(db, "UPDATE consumer_meta SET last_ack=? WHERE name=?", [String(Date().timeIntervalSince1970), consumer])
+            return ["consumer": consumer, "cursor": cursor, "generation": generation]
         }
     }
 }

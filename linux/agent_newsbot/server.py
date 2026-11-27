@@ -18,6 +18,7 @@ from .engine import fetch_all
 from .store import FreshnessStore
 from .stories import StoryStore
 from .library import LibraryConflict
+from .consumers import ConsumerConflict
 
 log = logging.getLogger("agent_newsbot")
 
@@ -220,10 +221,10 @@ class Handler(BaseHTTPRequestHandler):
         return hmac.compare_digest(auth, expected_bearer) or hmac.compare_digest(alt, STATE.token)
 
     def _library(self, method, parsed):
-        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export"}
+        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/consumers"}
         if parsed.path not in paths:
             self._send(404, {"error": "not found"}); return
-        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial"}):
+        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial", "/v1/consumers"}):
             self._send(405, {"error": "method not allowed"}); return
         try:
             query = {k: v[-1] for k, v in parse_qs(parsed.query, keep_blank_values=True).items()}
@@ -237,7 +238,8 @@ class Handler(BaseHTTPRequestHandler):
                 if len(raw) != length: raise ValueError("incomplete request body")
                 body = json.loads(raw)
                 if not isinstance(body, dict): raise ValueError("JSON object required")
-            if parsed.path == "/v1/library": result = STATE.stories.library(query)
+            if parsed.path == "/v1/consumers": result = STATE.stories.consumer_status() if method == "GET" else STATE.stories.consumer_change(body)
+            elif parsed.path == "/v1/library": result = STATE.stories.library(query)
             elif parsed.path == "/v1/library/settings":
                 result = STATE.stories.library_settings(body.get("kind"), body.get("name"), body.get("value"), write=method == "POST")
             elif parsed.path == "/v1/library/export": result = STATE.stories.research_export(query.get("id", ""))
@@ -246,8 +248,8 @@ class Handler(BaseHTTPRequestHandler):
                 if story is None: raise LookupError("story not found")
                 result = {"story": story}
             self._send(200, result)
-        except LibraryConflict as exc: self._send(409, {"error": str(exc)})
-        except LookupError: self._send(404, {"error": "story not found"})
+        except (LibraryConflict, ConsumerConflict) as exc: self._send(409, {"error": str(exc)})
+        except LookupError: self._send(404, {"error": "consumer not found" if parsed.path == "/v1/consumers" else "story not found"})
         except (ValueError, TypeError, RecursionError, TimeoutError) as exc: self._send(400, {"error": str(exc)[:200]})
         except (sqlite3.Error, OSError): self._send(503, {"error": "story storage unavailable"})
 
@@ -260,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
             return
-        if path == "/v1/library" or path.startswith("/v1/library/"):
+        if path == "/v1/library" or path.startswith("/v1/library/") or path == "/v1/consumers":
             self._library("GET", parsed); return
         qs = parse_qs(parsed.query)
         if path.startswith("/v1/stories/"):
@@ -283,9 +285,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/v1/events":
             try:
+                if set(qs)-{'consumer','limit'}: raise ValueError('event filters are unsupported; process the complete offered range')
                 consumer = (qs.get("consumer") or [""])[0]
                 limit = int((qs.get("limit") or ["100"])[0])
-                self._send(200, STATE.stories.pending(consumer, limit))
+                self._send(200, STATE.stories.pending(consumer, limit, lease=self.headers.get('X-Consumer-Lease')))
+            except ConsumerConflict as exc:
+                self._send(409, {"error": str(exc)})
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})
             except (sqlite3.Error, OSError):
@@ -351,14 +356,18 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
             return
-        if parsed.path == "/v1/library" or parsed.path.startswith("/v1/library/"):
+        if parsed.path == "/v1/library" or parsed.path.startswith("/v1/library/") or parsed.path == "/v1/consumers":
             self._library("POST", parsed); return
         if parsed.path == "/v1/events/ack":
             qs = parse_qs(parsed.query)
             try:
+                if set(qs)-{'consumer','through','generation'}: raise ValueError('event filters are unsupported; process the complete offered range')
                 consumer = (qs.get("consumer") or [""])[0]
                 through = int((qs.get("through") or [""])[0])
-                self._send(200, STATE.stories.acknowledge(consumer, through))
+                generation = int(qs['generation'][0]) if 'generation' in qs else None
+                self._send(200, STATE.stories.acknowledge(consumer, through, generation=generation, lease=self.headers.get('X-Consumer-Lease')))
+            except ConsumerConflict as exc:
+                self._send(409, {"error": str(exc)})
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})
             except (sqlite3.Error, OSError):

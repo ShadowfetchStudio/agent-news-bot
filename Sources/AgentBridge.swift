@@ -156,7 +156,7 @@ final class AgentBridge: @unchecked Sendable {
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
-        } else if path == "/v1/library" || path.hasPrefix("/v1/library/") {
+        } else if path == "/v1/library" || path.hasPrefix("/v1/library/") || path == "/v1/consumers" {
             var body: [String: Any] = [:]
             if method == "POST" {
                 guard headers["transfer-encoding"] == nil, let length = Int(headers["content-length"] ?? ""), (0...65536).contains(length) else {
@@ -174,7 +174,7 @@ final class AgentBridge: @unchecked Sendable {
                 }
                 body = parsed
             }
-            response = libraryResponse(path, method: method, query: Dictionary(queryItems.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last }), body: body)
+            response = path == "/v1/consumers" ? consumerResponse(method: method, body: body) : libraryResponse(path, method: method, query: Dictionary(queryItems.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last }), body: body)
         } else if path.hasPrefix("/v1/stories/") {
             let parts = path.split(separator: "/").map(String.init)
             if method != "GET" { response = json(405, ["error": "method not allowed"]) }
@@ -195,14 +195,20 @@ final class AgentBridge: @unchecked Sendable {
             } else if let stories {
                 let consumer = queryItems.first { $0.name == "consumer" }?.value ?? ""
                 do {
+                    let allowed: Set<String> = path == "/v1/events" ? ["consumer", "limit"] : ["consumer", "through", "generation"]
+                    guard Set(queryItems.map(\.name)).isSubset(of: allowed) else { throw ConsumerFailure.invalid("event filters are unsupported; process the complete offered range") }
                     if path == "/v1/events" {
                         guard let limit = Int(queryItems.first { $0.name == "limit" }?.value ?? "100") else { throw StoryStore.Failure.invalidLimit }
-                        response = json(200, try stories.pending(consumer: consumer, limit: limit))
+                        response = json(200, try stories.pending(consumer: consumer, limit: limit, lease: headers["x-consumer-lease"]))
                     } else {
                         guard let through = Int(queryItems.first { $0.name == "through" }?.value ?? "") else { throw StoryStore.Failure.invalidAcknowledgement }
-                        response = json(200, try stories.acknowledge(consumer: consumer, through: through))
+                        let raw = queryItems.first { $0.name == "generation" }?.value
+                        if let raw, Int(raw) == nil { throw ConsumerFailure.invalid("invalid generation") }
+                        response = json(200, try stories.acknowledge(consumer: consumer, through: through, generation: raw.flatMap(Int.init), lease: headers["x-consumer-lease"]))
                     }
-                } catch StoryStore.Failure.database { response = json(503, ["error": "story storage unavailable"]) }
+                } catch ConsumerFailure.conflict(let detail) { response = json(409, ["error": detail]) }
+                catch ConsumerFailure.invalid(let detail) { response = json(400, ["error": detail]) }
+                catch StoryStore.Failure.database { response = json(503, ["error": "story storage unavailable"]) }
                 catch { response = json(400, ["error": "invalid consumer, limit, or acknowledgement"]) }
             } else { response = json(503, ["error": "story storage unavailable"]) }
         } else if path == "/v1/fresh" {
@@ -293,6 +299,17 @@ final class AgentBridge: @unchecked Sendable {
             response = json(404, ["error": "not found"])
         }
         writeResponse(client, status: response.0, body: response.1)
+    }
+
+    private func consumerResponse(method: String, body: [String: Any]) -> (Int, Data) {
+        guard let stories else { return json(503, ["error": "story storage unavailable"]) }
+        guard ["GET", "POST"].contains(method) else { return json(405, ["error": "method not allowed"]) }
+        do { return json(200, try method == "GET" ? stories.consumerStatus() : stories.consumerChange(body)) }
+        catch ConsumerFailure.conflict(let detail) { return json(409, ["error": detail]) }
+        catch ConsumerFailure.invalid(let detail) { return json(400, ["error": detail]) }
+        catch ConsumerFailure.missing { return json(404, ["error": "consumer not found"]) }
+        catch StoryStore.Failure.invalidConsumer { return json(400, ["error": "invalid consumer or worker name"]) }
+        catch { return json(503, ["error": "story storage unavailable"]) }
     }
 
     private func libraryResponse(_ path: String, method: String, query: [String: String], body: [String: Any]) -> (Int, Data) {
