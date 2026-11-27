@@ -49,7 +49,7 @@ This selects the previous prepared release, applies the same backup and health c
 
 Legacy in-place installations have no staged `previous` release until the first staged upgrade succeeds. Their original files/unit are preserved, and a failed initial migration restores the old unit/runtime. `--rollback` requires a previous **staged** release. Old legacy directories are not deleted automatically.
 
-Recovery copies are not a full disaster-recovery system. They cover the story journal at activation, not configuration/credentials, feed cache, all snapshot files, or off-machine redundancy. Dedicated backup/restore and retention tooling remain a separate release-checklist item. No automatic cleanup of old release/recovery directories currently occurs; inspect storage and preserve the version/data needed for recovery before removing anything.
+Recovery copies are not a full disaster-recovery system. They cover the story journal at activation, not configuration/credentials, feed cache, all snapshot files, or off-machine redundancy. For full selected application data, use [application backup/restore](APPLICATION_RECOVERY.md); [history retention](HISTORY_RETENTION.md) is a separate explicit, backup-gated operation. No automatic cleanup of old release/recovery directories currently occurs; inspect storage and preserve the version/data needed for recovery before removing anything.
 
 ## Private settings
 

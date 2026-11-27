@@ -15,7 +15,7 @@ struct SettingsView: View {
             Section("Setup status") {
                 Label(settings.setupCompleted ? "Source setup saved" : "First-run setup pending", systemImage: settings.setupCompleted ? "checkmark.circle" : "circle")
                 Label(engine.bridgeReady ? "Local bridge listening" : "Bridge offline — see credential and port controls below", systemImage: engine.bridgeReady ? "checkmark.circle" : "exclamationmark.triangle")
-                Text("Current coverage: \(engine.coverageState). Open Coverage in the desk to inspect individual source results. Agent connections are optional and require their own tests.")
+                Text("Current coverage: \(engine.coverageState). Open Operations in the desk to inspect individual source results. Agent connections are optional and require their own tests.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Freshness") {

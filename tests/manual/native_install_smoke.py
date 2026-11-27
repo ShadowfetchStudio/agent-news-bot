@@ -3,6 +3,7 @@ Leaves isolated /tmp release/state/recovery artifacts for inspection. Not a pyte
 """
 from pathlib import Path
 import importlib.util
+import hashlib
 import json
 import os
 import socket
@@ -32,7 +33,12 @@ try:
     status=subprocess.check_output([str(base/'bin/agent-newsbot'),'consumers'],env=env,cwd='/tmp',text=True)
     assert json.loads(status)['consumers'][0]['consumer']=='preserved-reader'
     assert original==config.read_bytes() and obj.current.resolve()==second
-    report.update(first_install=True,upgrade=True,config_preserved=True,consumer_preserved=True)
+    icon_hash=subprocess.check_output([str(second/'.venv/bin/python'),'-c',"import hashlib,importlib.resources; print(hashlib.sha256((importlib.resources.files('agent_newsbot')/'resources/app-icon.png').read_bytes()).hexdigest())"],text=True,cwd='/tmp').strip()
+    assert icon_hash==hashlib.sha256((ROOT/'linux/agent_newsbot/resources/app-icon.png').read_bytes()).hexdigest()
+    operations=json.loads(subprocess.check_output([str(base/'bin/agent-newsbot'),'operations'],env=env,cwd='/tmp',text=True))
+    assert operations['complete'] and operations['sections']['delivery']['consumers'][0]['consumer']=='preserved-reader'
+    assert (state/'stories.sqlite').stat().st_mode & 0o777 == 0o600
+    report.update(first_install=True,upgrade=True,config_preserved=True,consumer_preserved=True,installed_icon_sha256=icon_hash,installed_operations=True,private_journal=True)
     rollback=[sys.executable,str(ROOT/'linux/installer.py'),'--user','--rollback','--prefix',str(obj.prefix),'--state',str(state),'--config',str(config),'--unit-dir',str(unit_dir),'--bin-dir',str(obj.bin_dir),'--service',service]
     subprocess.run(rollback,check=True)
     assert obj.current.resolve()==first and obj.wait_health(port)

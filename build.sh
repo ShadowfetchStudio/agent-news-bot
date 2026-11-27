@@ -131,6 +131,20 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+python3 - "$PROJECT_DIR" "$APP_DIR/Contents/Resources/BuildInfo.json" "$ARCH" <<'PYINFO'
+import datetime, json, pathlib, subprocess, sys
+root, output, architecture = sys.argv[1:]
+if (pathlib.Path(root)/'.git').exists():
+    commit = subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()
+    dirty = bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip())
+else:
+    manifest = pathlib.Path(root)/'RELEASE-INFO.json'
+    commit = json.loads(manifest.read_text()).get('source_commit') if manifest.exists() else None
+    dirty = None  # Source archives have no Git working-tree integrity check.
+pathlib.Path(output).write_text(json.dumps(dict(source_commit=commit,source_dirty=dirty,architecture=architecture,
+    built_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),signing='ad-hoc',notarized=False),indent=2)+'\n')
+PYINFO
+
 echo "==> Ad-hoc sign"
 codesign --force --deep --sign - "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"

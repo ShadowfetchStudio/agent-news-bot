@@ -38,10 +38,10 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 ## Setup and everyday use
 
 - [x] First-run mode selection, connection test and actionable provider errors.
-- [ ] Safe observable credential storage, failure preservation and rotation.
+- [x] Safe observable credential storage, failure preservation and rotation.
 - [x] Supported private Linux config and service wiring.
-- [ ] macOS automatic refresh and restored batch.
-- [ ] Disagreement/correction timeline, multiple desks and durable story detail.
+- [x] macOS automatic refresh and restored batch.
+- [x] Disagreement/correction timeline, multiple desks and durable story detail.
 - [x] Manual story-group split/merge with preserved identities, event history and explicit editorial review of legacy groups.
 - [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
 - [x] Persistent saved-search alerts and correction-review queue, with explicit seen versus approval state.
@@ -57,7 +57,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Backup, restore, consumer-safe pruning and bounded storage/load validation.
   - Research/application recovery, backup-gated pruning, configurable ingestion budgets and operator observations are implemented and tested. This is an ingestion ceiling, not an overall filesystem quota; protected research, manual writes, caches, WAL and external archives have the documented scope in `OPERATIONS.md`. Bounded synthetic load evidence is recorded below.
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
-- [ ] Private file permissions, dependency constraints and vulnerability scan.
+- [x] Private file permissions, dependency constraints and vulnerability scan.
 - [x] Total provider deadline and circuit breaker.
 - [x] Hosted data permissions documented separately from code licensing (documentation only; no account or publication clearance).
 
@@ -347,3 +347,13 @@ Overall storage controls/operator view, final broad UI/integration acceptance, p
 - Fetch preflight precedes provider calls; ingestion rechecks and applies a SQLite page ceiling. Oversized batches roll back story/event/alert changes together. Reads, editorial work, acknowledgements and explicit recovery remain available. `OPERATIONS.md` documents manual-write, WAL, concurrent-free-space and archive exclusions; no hard filesystem quota is claimed.
 - Full local regressions: **439 Mac passed; native Pop!_OS 270 passed / 169 Mac-only skips**. New tests cover atomic exhaustion/retry, lowered limits, old research preservation, policy validation/conflicts, low disk before provider collection, partial operator-section failure, authenticated HTTP parity, CLI and valid/invalid backup policies.
 - Native Apple Silicon build passed strict ad-hoc signature verification. Actual isolated UI verified over-budget pause, larger-budget recovery, unchanged consumer cursor, invalid input and unsaved-edit protection in a 620-pixel sheet. Fixed stale accessibility feedback and verified both validation and success labels. API-triggered blocked fetch reports failed and starts zero provider checks. Evidence: `audits/2026-11-27/operator-native-ui.json`. No production app/home or service was changed; fixture app stopped and isolated preferences removed. Full VoiceOver and final integration/release acceptance remain separate.
+
+
+## Final native workflow acceptance
+
+- Restored one current synthetic story, removed the expired snapshot item, retained AI/Science membership and showed the correction/disagreement warning. Expanded both revisions and direct/World Monitor observations; earlier and current headline/summary remain distinct. Tab traversed filter/list/sidebar and Down selected the other desk without losing the shared story.
+- Actual native automatic refresh, enabled through Settings at a five-minute interval, completed at 18:25:23Z and 18:30:29Z on November 27. Each observed live run reported 15 successful source checks and one degraded/rate-limited check rather than complete coverage. Snapshot writes succeeded. These are point-in-time source checks, not an upstream availability guarantee.
+- An intentionally malformed private fixture token remained unchanged; startup showed an actionable error and the bridge stayed offline while research remained readable. Repairing the fixture file and clicking Reload credential restored the listener and authenticated current-story lookup. Explicit unchanged credential Save displayed No credential changes. Concurrency, stale rotation, actual listener old/new token rejection and Keychain failure preservation remain covered by the automated native suite.
+- Evidence: `audits/2026-11-27/release-native-ui.json`. Fixture app stopped; isolated preferences removed. The source build used for these checks is 75f03a7 plus no runtime changes (the later Settings edit only renames Coverage to Operations).
+- Keyboard and accessibility-tree walkthroughs cover the exercised screens; VoiceOver launch timed out and did not produce a running reader in the available UI inventory even after its preference was temporarily enabled. Its original off state and System Settings pane were restored. Actual speech output/full screen-reader acceptance is not claimed. Optional live Hermes/OpenClaw handoff also remains unverified because the runtimes were absent on the checked hosts. These limitations must be in release notes, not silently treated as passing integration tests.
+- The owner explicitly selected publication of a clearly labeled ad-hoc Mac build. Developer ID/notarization and clean-account Gatekeeper acceptance are not claimed; the download and installation guide identify the format. The downloadable app targets Apple Silicon; native Intel execution is not claimed.

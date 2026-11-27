@@ -28,4 +28,4 @@ where = ["."]
 include = ["agent_newsbot*"]
 
 [tool.setuptools.package-data]
-agent_newsbot = ["vendor/*"]
+agent_newsbot = ["vendor/*", "resources/*"]

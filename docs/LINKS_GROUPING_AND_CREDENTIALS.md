@@ -37,4 +37,4 @@ The rotation test exercises the actual listener: the former token receives 401, 
 
 Regression coverage includes cross-runtime URL fixtures, actual RSS rejection/coverage, legacy snapshot and export blocking, distinct-event grouping, equivalent-headline grouping, unchanged source identity after corrections, and immutable prior events. Native credential fixtures cover concurrent creators, private mode, directory/symlink/invalid-file failures, stale rotation requests and live-listener rotation. All fixtures use isolated temporary data and synthetic credentials.
 
-These repairs do not close the separate setup wizard, general source/HTTP deadlines, source circuit breakers, retention, full GUI/accessibility, real provider/agent integration or final publication requirements.
+This document records the scoped link/grouping/credential repair batch. The [release checklist](RELEASE_CHECKLIST.md) and [release notes](RELEASE_NOTES_1.2.0.md) track subsequent implementation, publication evidence and integration/accessibility limitations.

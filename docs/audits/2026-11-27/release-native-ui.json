@@ -1,0 +1,28 @@
+{
+  "fixture": "/Volumes/NVME1TB/DEV/anb-release-ui-1sp213an",
+  "restored_stories": 1,
+  "expired_snapshot_item_removed": true,
+  "shared_desks": [
+    "science",
+    "ai"
+  ],
+  "disagreement_and_provider_history_visible": true,
+  "keyboard": "Tab from filter to story list and sidebar; Down selected Science from AI with the same shared story.",
+  "auto_refresh_first": "2026-11-27T18:25:23Z",
+  "auto_refresh_second": "2026-11-27T18:30:29Z",
+  "coverage": {
+    "state": "partial",
+    "checked": 16,
+    "successful": 15,
+    "degraded": 1
+  },
+  "snapshot_error": null,
+  "voiceover": "AX labels and keyboard checked. VoiceOver preference enabled temporarily, but launch did not produce a running screen-reader app in available UI tools; speech acceptance not claimed. Original off preference and General pane restored.",
+  "invalid_credential_preserved": true,
+  "invalid_credential_bridge_offline": true,
+  "credential_failure_visible": true,
+  "credential_reload_ui": true,
+  "credential_reload_api": true,
+  "no_change_credential_save_visible": true,
+  "research_preserved_after_credential_failure": true
+}

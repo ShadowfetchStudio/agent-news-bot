@@ -29,6 +29,19 @@ includes an explicit connection test using the entered values; Linux provides
 Persistent source history and backoff are available in Operations, `GET /v1/sources`, and
 `agent-newsbot source-health`. See [source resilience and maintained feeds](docs/SOURCE_HEALTH.md).
 
+## Downloads and release status
+
+[Download version 1.2.0](https://github.com/ShadowfetchStudio/agent-news-bot/releases/tag/v1.2.0).
+The Mac ZIP is **Apple Silicon, macOS 14+, ad-hoc signed and not notarized**.
+Read [Mac installation](docs/MAC_INSTALL.md) before opening it. Linux ships a
+source installer for the headless systemd service; dependency installation needs
+network access and Python 3.10+. SHA-256 checksums and source commit metadata ship
+with both downloads. No research archives, user configuration or credentials are
+part of a release package.
+
+See [release notes and validation limits](docs/RELEASE_NOTES_1.2.0.md),
+[Linux upgrades](docs/LINUX_UPGRADES.md), and [application recovery](docs/APPLICATION_RECOVERY.md).
+
 ## Table of contents
 
 - [Who it's for](#who-its-for)
@@ -283,7 +296,7 @@ See [article-link safety, grouping and bridge credential recovery](docs/LINKS_GR
 
 ## Build & run — macOS
 
-Requirements: macOS 14+, the Swift toolchain (Xcode or Command Line Tools). No Xcode project and no
+Requirements: macOS 14+, Python 3 for build metadata, the Swift toolchain (Xcode or Command Line Tools). No Xcode project and no
 third-party Swift packages — it compiles straight from source with `swiftc`.
 
 ```bash
@@ -302,6 +315,18 @@ Open that bundle, choose **Fetch Fresh** (⌘R), and the bridge starts automatic
 To install a new copy, run `./build.sh --install`. The installer refuses to overwrite
 an existing `/Applications/Agent News Bot.app`; review the built copy and replace an
 old installation manually if desired. It never removes NewsBot or its saved data.
+
+To package a release from a clean Git checkout after building that exact commit:
+
+```bash
+python3 tools/package_release.py --output dist/1.2.0
+```
+
+The output directory must be new. Packaging verifies the native signature and
+source identity, includes only tracked source in the Linux archive, and writes
+`RELEASE-INFO.json` and `SHA256SUMS`. It does not upload files. Builds from source
+archives record the release commit when available, but cannot attest to an
+unmodified Git working tree.
 
 ## Build & run — Linux
 

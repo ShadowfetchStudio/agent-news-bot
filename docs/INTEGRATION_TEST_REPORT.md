@@ -1,4 +1,4 @@
-> Historical integration baseline. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for subsequent audit repairs and current release gates.
+> Historical integration report. See [current release notes](RELEASE_NOTES_1.2.0.md) and [release checklist](RELEASE_CHECKLIST.md) for the final scope and newer evidence.
 
 # World Monitor integration test report
 
