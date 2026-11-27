@@ -2115,3 +2115,37 @@ def test_editorial_brief_resolves_legacy_alias_without_mutation(journal_runtime)
     with sqlite3.connect(journal_runtime.path) as db:
         db.execute('INSERT INTO identity_aliases(alias,story_id) VALUES (?,?)',('legacy-brief-id',sid))
     assert journal_runtime.research_brief('legacy-brief-id') == journal_runtime.research_brief(sid)
+
+
+
+def test_editorial_read_keeps_story_and_decision_in_one_snapshot(tmp_path):
+    journal = StoryStore(tmp_path/'stories.sqlite')
+    writer = StoryStore(journal.path)
+    a = article(summary='Original report')
+    row = journal.ingest([a])[0]; sid = row['id']
+    original = journal.connect
+    updated = False
+    @contextmanager
+    def interleaved():
+        nonlocal updated
+        with original() as db:
+            class Connection:
+                def execute(self, sql, args=()):
+                    nonlocal updated
+                    cursor = db.execute(sql, args)
+                    if not updated and sql.startswith('SELECT payload,id FROM stories'):
+                        updated = True
+                        writer.ingest([dict(a,summary='Corrected report')])
+                        writer.save_editorial(sid,dict(expected_revision=2,expected_editorial_version=0,
+                            draft_patch={'x_post':'Updated draft'},platform_status={'x':'approved'}))
+                    return cursor
+            yield Connection()
+    journal.connect=interleaved
+    saved=journal.editorial(sid)
+    assert updated
+    assert saved['revision'] == 1
+    assert saved['editorial']['version'] == 0
+    assert saved['editorial']['drafts'] == {}
+    fresh=journal.editorial(sid)
+    assert fresh['revision'] == 2 and fresh['editorial']['version'] == 1
+    assert fresh['editorial']['platforms']['x']['status'] == 'approved'

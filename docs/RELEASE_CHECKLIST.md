@@ -287,3 +287,6 @@ Final platform-approval focused verification: **16 passed on Mac; 8 passed / 8 M
 - Actual Mac Export action created four private files; `brief.md` equals `research.json.brief.markdown`, and the live authenticated brief matches the export. Fixture evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-brief-ui-l28s4qmf/verification.json`; brief SHA256 `e38416641e343458843b39704cc9d7842c5cc9ddbd644ca08264c97642369b13`. Isolated app/preferences cleaned up; production state was not replaced.
 
 The editorial export checkbox is closed at its stated manual-handoff scope. Persistent follow-up/alert workflows, consumer-aware retention, broader recovery, complete accessibility/real-agent/provider acceptance and final distribution remain separate open work.
+
+
+Final brief-batch follow-up: the ordinary Python editorial GET now also reads story and draft state in a single transaction. A controlled concurrent writer regression verifies that old story data cannot be paired with a newer approval; both that case and the export-snapshot case passed on Mac and native Linux. Native Swift reads already use the common transactional store. The universal macOS app also compiled successfully; its architecture/signature checks are separate from native Intel execution and notarization.

@@ -111,6 +111,7 @@ class LibraryMixin:
 
     def editorial(self, story_id):
         with self.lock, self.connect() as db:
+            db.execute("BEGIN")
             row = db.execute("SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", (story_id, story_id)).fetchone()
             if not row: return None
             state = db.execute("SELECT payload FROM editorial WHERE story_id=?", (row[1],)).fetchone()
