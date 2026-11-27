@@ -5,7 +5,7 @@ enum APIContract {
     static let features = Dictionary(uniqueKeysWithValues: [
         "async_fetch", "durable_stories", "source_observations", "story_revisions", "consumer_delivery",
         "consumer_generations", "consumer_leases", "research_library", "editorial_drafts", "research_export",
-        "group_repairs", "worldmonitor_digest", "source_health"].map { ($0, 1) })
+        "group_repairs", "worldmonitor_digest", "source_health", "platform_approval"].map { ($0, 1) })
     static let routes: [String: [String]] = [
         "/health": ["GET"], "/v1/capabilities": ["GET"], "/v1/status": ["GET"], "/v1/fresh": ["GET"],
         "/v1/articles/{id}": ["GET"], "/v1/desks": ["GET"], "/v1/sources": ["GET"], "/v1/fetch": ["POST"],

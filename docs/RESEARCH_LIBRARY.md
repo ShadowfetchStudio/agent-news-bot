@@ -18,7 +18,7 @@ Generate templates creates five editable fields: YouTube title/description, X po
 
 Save uses both the current story revision and editorial version. If another writer saved a draft or the story changed, it refuses to overwrite and preserves the open editor text. Copy unsaved work before reloading. Done and Reload ask before discarding edits; the editor labels unsaved changes. Regenerate explicitly confirms replacing templates.
 
-Approval requires all five fields, valid draft limits and a current source revision. A later story revision changes the effective state to **needs review**. Approval is a local editorial decision, not a claim of factual or licensing clearance. Refresh/reopen to see an external correction; an old open editor cannot save over the new revision.
+Each platform tab can save and approve its own text without completing the other platforms. Whole-package approval still requires all five fields. Valid draft limits and the current story/editorial versions are required. Editing one platform clears only its approval; a later story revision changes previously approved decisions to **needs review**. Approval is a local editorial decision, not a claim of factual or licensing clearance. Refresh/reopen to see an external correction; an old open editor cannot save over the new revision. See [platform decisions, partial updates and compatibility](PLATFORM_APPROVAL.md).
 
 X uses the packaged twitter-text weighted parser and a 280-character ceiling; the editor shows its live weighted count. Other enforced limits are 100 Unicode code points for YouTube title, 5,000 for description, 2,200 for TikTok caption, and 12,000 for narration/notes. These are this app's conservative draft constraints, not promises about every platform/API's current limits. Invalid changes roll back entirely.
 
@@ -26,8 +26,8 @@ X uses the packaged twitter-text weighted parser and a 280-character ceiling; th
 
 **Export saved research package** exports the last saved version, not unsaved editor contents. Each export creates its own `Research-<UUID>` directory containing:
 
-- `research.json`: current story, provenance, editorial state, revision and source URLs.
-- `posts.md`: saved platform drafts, narration starter, notes and rights reminders.
+- `research.json`: current story, provenance, editorial state, per-platform approvals, revision and source URLs.
+- `posts.md`: saved platform drafts and their approval states, narration starter, notes and rights reminders.
 - `sources.txt`: one original source URL per line.
 
 Directories are private (0700), files 0600, and an atomic staged rename avoids half-complete packages and overwriting earlier exports. The JSON records whether approval still matches the current revision. Exports may contain private editorial notes; share deliberately.

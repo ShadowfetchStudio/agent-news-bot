@@ -12,7 +12,29 @@ SCHEMA = [
 ]
 STATES = {"unreviewed", "draft", "needs_review", "approved", "rejected"}
 FIELDS = {"youtube_title": 100, "youtube_description": 5000, "x_post": 12000, "tiktok_caption": 2200, "narration": 12000}
+PLATFORMS = {"youtube": ("youtube_title", "youtube_description"), "x": ("x_post",),
+             "tiktok": ("tiktok_caption",), "narration": ("narration",)}
 class LibraryConflict(ValueError): pass
+
+
+def platform_states(story, state):
+    saved = state.get("platforms", {})
+    result = {}
+    for name in PLATFORMS:
+        row = dict(saved.get(name, {"status": state.get("status", "unreviewed"),
+                                    "approved_revision": state.get("approved_revision")}))
+        if row.get("status") == "approved" and (row.get("approved_revision") != story.get("revision") or story.get("merged_into")):
+            row["status"] = "needs_review"
+        result[name] = row
+    return result
+
+
+def aggregate(platforms):
+    states = {value["status"] for value in platforms.values()}
+    if "needs_review" in states: return "needs_review"
+    if len(states) == 1: return next(iter(states))
+    return "draft"
+
 
 
 def templates(story):
@@ -31,6 +53,8 @@ def decorate(story, editorial):
     state.setdefault("drafts", {}); state.setdefault("notes", "")
     if state["status"] == "approved" and state.get("approved_revision") != story.get("revision"):
         state["status"] = "needs_review"
+    state["platforms"] = platform_states(story, state)
+    state["status"] = aggregate(state["platforms"])
     count = len(story.get("sources", []))
     safe_links = all(safe_article_url(url) for url in [story.get('url')] + [s.get('url') for s in story.get('sources', [])])
     priority = min(count, 5) * 5 + (15 if story.get("disagreement") else 0) + (10 if story.get("change") == "updated" else 0)
@@ -66,7 +90,7 @@ def query_sql(query):
         clauses.append("EXISTS(SELECT 1 FROM json_each(s.payload,'$.sources') src, json_each(src.value,'$.providers') p WHERE p.value=?)")
         values.append(query["provider"])
     if query.get("bookmarked") == "true": clauses.append("coalesce(json_extract(e.payload,'$.bookmarked'),0)=1")
-    status = "CASE WHEN json_extract(e.payload,'$.status')='approved' AND coalesce(json_extract(e.payload,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision') THEN 'needs_review' ELSE coalesce(json_extract(e.payload,'$.status'),'unreviewed') END"
+    status = "CASE WHEN (json_extract(e.payload,'$.status')='approved' AND coalesce(json_extract(e.payload,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision')) OR EXISTS(SELECT 1 FROM json_each(e.payload,'$.platforms') p WHERE json_extract(p.value,'$.status')='approved' AND coalesce(json_extract(p.value,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision')) THEN 'needs_review' ELSE coalesce(json_extract(e.payload,'$.status'),'unreviewed') END"
     if query.get("status"):
         if query["status"] not in STATES: raise ValueError("invalid editorial status")
         clauses.append(status + "=?"); values.append(query["status"])
@@ -93,7 +117,9 @@ class LibraryMixin:
             return decorate(json.loads(row[0]), json.loads(state[0]) if state else {})
 
     def save_editorial(self, story_id, change):
-        if set(change) - {"expected_revision", "expected_editorial_version", "bookmarked", "status", "notes", "drafts", "generate"}: raise ValueError("unknown editorial field")
+        if set(change) - {"expected_revision", "expected_editorial_version", "bookmarked", "status", "notes", "drafts", "draft_patch", "platform_status", "generate"}: raise ValueError("unknown editorial field")
+        if "platform_status" in change and "status" in change: raise ValueError("choose platform_status or whole-package status")
+        if sum(("drafts" in change, "draft_patch" in change, change.get("generate") is True)) > 1: raise ValueError("choose one draft operation")
         with self.lock, self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", (story_id, story_id)).fetchone()
@@ -111,13 +137,24 @@ class LibraryMixin:
             if "notes" in change:
                 if not isinstance(change["notes"], str) or len(change["notes"]) > 12000: raise ValueError("notes too long")
                 state["notes"] = change["notes"]
-            if change.get("generate") is True or "drafts" in change:
+            if change.get("generate") is True or "drafts" in change or "draft_patch" in change:
                 require_safe_story(story)
-                drafts = templates(story) if change.get("generate") is True else change["drafts"]
+                previous_drafts = state["drafts"]
+                if "draft_patch" in change:
+                    patch = change["draft_patch"]
+                    if not isinstance(patch, dict) or not patch or set(patch)-set(FIELDS): raise ValueError("invalid draft patch")
+                    drafts = {k: previous_drafts.get(k, "") for k in FIELDS}
+                    drafts.update(patch)
+                else: drafts = templates(story) if change.get("generate") is True else change["drafts"]
                 if not isinstance(drafts, dict) or set(drafts) != set(FIELDS): raise ValueError("all five draft fields are required")
                 if any(not isinstance(drafts[k], str) or len(drafts[k]) > length for k, length in FIELDS.items()): raise ValueError("draft field too long")
                 if drafts["x_post"] and not measure(drafts["x_post"])["valid"]: raise ValueError("X draft is invalid or over 280 weighted characters")
-                state.update(drafts=drafts, source_revision=story["revision"], status="draft", approved_revision=None)
+                for name, fields in PLATFORMS.items():
+                    if change.get("generate") is True or any(drafts[k] != previous_drafts.get(k, "") for k in fields):
+                        state["platforms"][name] = {"status": "draft", "approved_revision": None}
+                state.update(drafts=drafts, source_revision=story["revision"])
+                state["status"] = aggregate(state["platforms"])
+                if state["status"] != "approved": state["approved_revision"] = None
             if "status" in change:
                 status = change["status"]
                 if not isinstance(status, str) or status not in STATES: raise ValueError("invalid editorial status")
@@ -128,6 +165,20 @@ class LibraryMixin:
                     state["approved_revision"] = story["revision"]
                 else: state["approved_revision"] = None
                 state["status"] = status
+                state["platforms"] = {name: {"status": status, "approved_revision": state["approved_revision"]} for name in PLATFORMS}
+            if "platform_status" in change:
+                decisions = change["platform_status"]
+                if not isinstance(decisions, dict) or not decisions or set(decisions)-set(PLATFORMS): raise ValueError("invalid platform decision")
+                for name, status in decisions.items():
+                    if not isinstance(status, str) or status not in STATES: raise ValueError("invalid platform status")
+                    if status == "approved":
+                        require_safe_story(story)
+                        if not all(state["drafts"].get(k, "").strip() for k in PLATFORMS[name]): raise ValueError("complete this platform's draft before approval")
+                        if name == "x" and not measure(state["drafts"]["x_post"])["valid"]: raise ValueError("X draft is invalid or over 280 weighted characters")
+                    state["platforms"][name] = {"status": status, "approved_revision": story["revision"] if status == "approved" else None}
+                state["status"] = aggregate(state["platforms"])
+                state["approved_revision"] = story["revision"] if state["status"] == "approved" else None
+                if state["status"] == "approved": state["source_revision"] = story["revision"]
             state["version"] += 1
             state["updated_at"] = datetime.now(timezone.utc).isoformat()
             db.execute("INSERT OR REPLACE INTO editorial VALUES (?,?)", (sid, json.dumps(state)))
@@ -155,6 +206,7 @@ class LibraryMixin:
         urls = list(dict.fromkeys(s["url"] for s in story.get("sources", []))) or [story["url"]]
         return {"schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": story["editorial"]["status"] == "approved", "source_urls": urls,
+                "platform_approvals": story["editorial"]["platforms"],
                 "videobot": {"action": "inspect", "urls": urls,
                     "instructions": "Paste these source URLs into VideoBot Inspect URLs, review discovered media, then choose what to queue. No media availability or reuse permission is implied."},
                 "rights": "unknown; review each source before reuse", "publishing": "manual only"}
@@ -174,6 +226,7 @@ def write_package(payload, parent):
     try:
         story = payload["story"]; state = story["editorial"]; drafts = state["drafts"]
         parts = ["# " + story["title"], "Editorial state: " + state["status"]]
+        parts += ["Platform approval: " + name + " — " + state["platforms"][name]["status"] for name in PLATFORMS]
         for key in sorted(FIELDS): parts += ["\n## " + key, drafts.get(key, "")]
         parts += ["\n## Research notes", state["notes"], "\n## Sources", "\n".join(payload["source_urls"]),
                   "\nMedia rights remain unknown. Paste sources.txt into VideoBot Inspect URLs, review discovered media, then choose what to queue. No downloading or posting was performed."]

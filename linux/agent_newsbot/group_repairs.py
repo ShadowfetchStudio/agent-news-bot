@@ -109,6 +109,7 @@ class GroupRepairMixin:
                              disagreement=reports_disagree(story["sources"]), review_note="Manual grouping repair; review sources and saved drafts before use.")
                 story.pop("display_desks", None)
                 state.update(status="needs_review", approved_revision=None, version=state["version"]+1, updated_at=stamp)
+                state["platforms"] = {name: {"status": "needs_review", "approved_revision": None} for name in ("youtube", "x", "tiktok", "narration")}
                 # Clear the old event pointer before publishing the immutable new event.
                 story.pop("event_seq", None)
                 event = db.execute("INSERT INTO events(story_id,payload) VALUES (?,?)", (story["id"], encoded(story)))

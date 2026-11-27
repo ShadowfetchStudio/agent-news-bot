@@ -93,6 +93,7 @@ extension StoryStore {
                 story["disagreement"] = disagree(sources); story["review_note"] = "Manual grouping repair; review sources and saved drafts before use."
                 story.removeValue(forKey: "display_desks"); story.removeValue(forKey: "event_seq")
                 state["status"] = "needs_review"; state["approved_revision"] = NSNull()
+                state["platforms"] = Dictionary(uniqueKeysWithValues: LibraryModel.platforms.keys.map { ($0, ["status": "needs_review", "approved_revision": NSNull()] as [String: Any]) })
                 state["version"] = (state["version"] as? Int ?? 0) + 1; state["updated_at"] = stamp
                 let id = story["id"] as! String
                 try run(db, "INSERT INTO events(story_id,payload) VALUES (?,?)", [id, try encode(story)])

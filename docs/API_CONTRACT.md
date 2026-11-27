@@ -11,7 +11,9 @@ The response advertises:
 - `error_schema_version: 1`: structured error format.
 - `app_version`: packaged application version, distinct from protocol version.
 - `implementation`: `swift` or `python`; all other advertised contract fields have cross-runtime parity tests.
-- `features`: integer versions for async fetch, durable stories, source observations, revision history, consumer delivery/generations/leases, research library, editorial drafts, research export, group repair and optional World Monitor digest support.
+- `features`: integer versions for async fetch, durable stories, source observations, revision history, consumer delivery/generations/leases, research library, editorial drafts, platform approval, research export, group repair, persistent source health and optional World Monitor digest support.
+
+`platform_approval: 1` enables [independent platform decisions and draft patches](PLATFORM_APPROVAL.md) on the existing editorial route. The aggregate export `approved` retains its whole-package meaning; platform consumers inspect `platform_approvals` and the source revision.
 - `routes`: canonical route templates and supported methods. Substitute a canonical story ID for `{id}`. Use the feature-specific guides for request/query fields.
 - `limits`: 64 KiB JSON requests, 16 MiB responses, maximum fresh/event pages of 500, library/revision pages of 100, 4 MiB repair evidence and 10–300 second consumer leases.
 - `authentication`, `delivery`, `limitations` and an HTTP-status-to-error-code/recovery map.

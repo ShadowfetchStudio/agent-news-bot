@@ -143,6 +143,9 @@ struct EditorialView: View {
     @State private var status = "unreviewed"
     @State private var message = ""
     @State private var drafts: [String: String] = [:]
+    @State private var savedDrafts: [String: String] = [:]
+    @State private var savedStatus = "unreviewed"
+    @State private var platformStates: [String: [String: Any]] = [:]
     @State private var quality: [String] = []
     @State private var sources: [String] = []
     @State private var revision = 0
@@ -167,9 +170,9 @@ struct EditorialView: View {
             HStack {
                 Text("Story revision \(revision) · draft version \(version)").font(.caption)
                 Toggle("Bookmark", isOn: $bookmarked).disabled(retired)
-                Picker("Editorial state", selection: $status) { ForEach(LibraryModel.states.sorted(), id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }.disabled(retired)
+                Picker("Whole-package state", selection: $status) { ForEach(LibraryModel.states.sorted(), id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }.disabled(retired)
             }
-            Text("Approval applies only to this revision. Nothing is posted automatically.").font(.caption).foregroundStyle(.secondary)
+            Text("Approve individual platforms in their tabs. Changing the whole-package state applies to every platform. Nothing is posted automatically.").font(.caption).foregroundStyle(.secondary)
             ForEach(quality, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
             TabView {
                 ScrollView {
@@ -220,13 +223,27 @@ struct EditorialView: View {
     }
     @ViewBuilder private func draftEditor(_ key: String, label: String, second: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            let platform = LibraryModel.platforms.first(where: { $0.value.contains(key) })!.key
+            let display = platform == "x" ? "X" : platform == "youtube" ? "YouTube" : platform == "tiktok" ? "TikTok" : "narration"
+            let edited = LibraryModel.platforms[platform]!.contains { (drafts[$0] ?? "") != (savedDrafts[$0] ?? "") }
+            Text("Saved " + display + " state: " + ((platformStates[platform]?["status"] as? String ?? "unreviewed").replacingOccurrences(of: "_", with: " "))).font(.caption.bold())
+            if edited { Text("Unsaved edits will clear this platform's prior approval.").font(.caption).foregroundStyle(.orange) }
+            HStack {
+                Button("Save and approve " + display) { save(generate: false, platform: platform, decision: "approved") }
+                Menu("Set " + display + " state") {
+                    Button("Needs review") { save(generate: false, platform: platform, decision: "needs_review") }
+                    Button("Rejected") { save(generate: false, platform: platform, decision: "rejected") }
+                    Button("Draft") { save(generate: false, platform: platform, decision: "draft") }
+                }
+            }.disabled(!loaded || status != savedStatus)
+            if status != savedStatus { Text("Save or revert the whole-package state change first.").font(.caption) }
             Text(label).font(.caption)
             TextEditor(text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })).font(.body).accessibilityLabel(label)
             if key == "x_post" {
                 let measurement = try? XText.request(["op": "measure", "text": drafts[key] ?? ""])
                 Text(measurement.map { "\($0["weightedLength"] as? Int ?? 0) / 280 weighted characters" } ?? "X validation unavailable").font(.caption)
             }
-            if let second { Text("Description").font(.caption); TextEditor(text: Binding(get: { drafts[second] ?? "" }, set: { drafts[second] = $0 })) }
+            if let second { Text("Description").font(.caption); TextEditor(text: Binding(get: { drafts[second] ?? "" }, set: { drafts[second] = $0 })).accessibilityLabel("YouTube description") }
         }.padding().disabled(retired)
     }
     private func apply(_ row: [String: Any]) {
@@ -234,6 +251,7 @@ struct EditorialView: View {
         title = row["title"] as? String ?? ""; revision = row["revision"] as? Int ?? 0; version = state["version"] as? Int ?? 0
         status = state["status"] as? String ?? "unreviewed"; bookmarked = state["bookmarked"] as? Bool ?? false
         notes = state["notes"] as? String ?? ""; drafts = state["drafts"] as? [String: String] ?? [:]
+        savedDrafts = drafts; savedStatus = status; platformStates = state["platforms"] as? [String: [String: Any]] ?? [:]
         quality = row["quality_notes"] as? [String] ?? []
         summary = row["summary"] as? String ?? ""
         retired = row["merged_into"] != nil
@@ -254,12 +272,14 @@ struct EditorialView: View {
         do { guard let row = try store.editorial(storyID) else { throw LibraryFailure.missing }; apply(row); message = "" }
         catch { message = "Could not load the retained story." }
     }
-    private func save(generate: Bool) {
+    private func save(generate: Bool, platform: String? = nil, decision: String? = nil) {
         var change: [String: Any] = ["expected_revision": revision, "expected_editorial_version": version, "bookmarked": bookmarked, "notes": notes]
         if generate { change["generate"] = true }
         else {
-            change["status"] = status
-            if !drafts.isEmpty { change["drafts"] = Dictionary(uniqueKeysWithValues: LibraryModel.fields.keys.map { ($0, drafts[$0] ?? "") }) }
+            if let platform, let decision { change["platform_status"] = [platform: decision] }
+            else if status != savedStatus { change["status"] = status }
+            let patch = Dictionary(uniqueKeysWithValues: LibraryModel.fields.keys.filter { (drafts[$0] ?? "") != (savedDrafts[$0] ?? "") }.map { ($0, drafts[$0] ?? "") })
+            if !patch.isEmpty { change["draft_patch"] = patch }
         }
         do { apply(try store.saveEditorial(storyID, change: change)); message = "Saved. No posts were published."; changed() }
         catch LibraryFailure.conflict(let detail) { message = detail + ". Your unsaved text is still here; copy it before reloading." }

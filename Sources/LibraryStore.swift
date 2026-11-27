@@ -5,6 +5,20 @@ enum LibraryFailure: Error { case invalid(String), conflict(String), missing }
 enum LibraryModel {
     static let states: Set<String> = ["unreviewed", "draft", "needs_review", "approved", "rejected"]
     static let fields = ["youtube_title": 100, "youtube_description": 5000, "x_post": 12000, "tiktok_caption": 2200, "narration": 12000]
+    static let platforms = ["youtube": ["youtube_title", "youtube_description"], "x": ["x_post"], "tiktok": ["tiktok_caption"], "narration": ["narration"]]
+    static func platformStates(_ story: [String: Any], _ state: [String: Any]) -> [String: [String: Any]] {
+        let saved = state["platforms"] as? [String: [String: Any]] ?? [:]
+        return Dictionary(uniqueKeysWithValues: platforms.keys.map { name in
+            var row = saved[name] ?? ["status": state["status"] ?? "unreviewed", "approved_revision": state["approved_revision"] ?? NSNull()]
+            if row["status"] as? String == "approved", row["approved_revision"] as? Int != story["revision"] as? Int || story["merged_into"] != nil { row["status"] = "needs_review" }
+            return (name, row)
+        })
+    }
+    static func aggregate(_ platforms: [String: [String: Any]]) -> String {
+        let states = Set(platforms.values.compactMap { $0["status"] as? String })
+        if states.contains("needs_review") { return "needs_review" }
+        return states.count == 1 ? states.first! : "draft"
+    }
     static func clipped(_ text: String, _ count: Int) -> String { String(String.UnicodeScalarView(text.unicodeScalars.prefix(count))) }
     static func templates(_ story: [String: Any]) -> [String: String] {
         let title = story["title"] as? String ?? "", summary = story["summary"] as? String ?? "", url = story["url"] as? String ?? ""
@@ -20,6 +34,8 @@ enum LibraryModel {
         state["status"] = state["status"] ?? "unreviewed"; state["bookmarked"] = state["bookmarked"] ?? false
         state["drafts"] = state["drafts"] ?? [String: String](); state["notes"] = state["notes"] ?? ""
         if state["status"] as? String == "approved", state["approved_revision"] as? Int != story["revision"] as? Int { state["status"] = "needs_review" }
+        let platforms = platformStates(story, state)
+        state["platforms"] = platforms; state["status"] = aggregate(platforms)
         let count = (story["sources"] as? [Any] ?? []).count, disagreement = story["disagreement"] as? Bool == true
         result["editorial"] = state
         result["review_priority"] = min(count, 5) * 5 + (disagreement ? 15 : 0) + (story["change"] as? String == "updated" ? 10 : 0)
@@ -56,7 +72,7 @@ enum LibraryModel {
         if query["bookmarked"] == "true" { clauses.append("coalesce(json_extract(e.payload,'$.bookmarked'),0)=1") }
         if let value = query["status"], !value.isEmpty {
             guard states.contains(value) else { throw LibraryFailure.invalid("invalid editorial status") }
-            clauses.append("CASE WHEN json_extract(e.payload,'$.status')='approved' AND coalesce(json_extract(e.payload,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision') THEN 'needs_review' ELSE coalesce(json_extract(e.payload,'$.status'),'unreviewed') END=?"); values.append(value)
+            clauses.append("CASE WHEN (json_extract(e.payload,'$.status')='approved' AND coalesce(json_extract(e.payload,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision')) OR EXISTS(SELECT 1 FROM json_each(e.payload,'$.platforms') p WHERE json_extract(p.value,'$.status')='approved' AND coalesce(json_extract(p.value,'$.approved_revision'),0)!=json_extract(s.payload,'$.revision')) THEN 'needs_review' ELSE coalesce(json_extract(e.payload,'$.status'),'unreviewed') END=?"); values.append(value)
         }
         if query["include_muted"] != "true" {
             clauses.append("(NOT EXISTS(SELECT 1 FROM json_each(s.payload,'$.sources')) OR EXISTS(SELECT 1 FROM json_each(s.payload,'$.sources') src WHERE NOT EXISTS(SELECT 1 FROM library_preferences p WHERE p.kind='mute' AND lower(p.name)=lower(json_extract(src.value,'$.source')))))")
@@ -84,7 +100,9 @@ extension StoryStore {
         }
     }
     func saveEditorial(_ id: String, change: [String: Any]) throws -> [String: Any] {
-        guard Set(change.keys).isSubset(of: ["expected_revision", "expected_editorial_version", "bookmarked", "status", "notes", "drafts", "generate"]) else { throw LibraryFailure.invalid("unknown editorial field") }
+        guard Set(change.keys).isSubset(of: ["expected_revision", "expected_editorial_version", "bookmarked", "status", "notes", "drafts", "draft_patch", "platform_status", "generate"]) else { throw LibraryFailure.invalid("unknown editorial field") }
+        guard change["platform_status"] == nil || change["status"] == nil else { throw LibraryFailure.invalid("choose platform_status or whole-package status") }
+        guard [change["drafts"] != nil, change["draft_patch"] != nil, change["generate"] as? Bool == true].filter({ $0 }).count <= 1 else { throw LibraryFailure.invalid("choose one draft operation") }
         return try withDB { db in
             guard let row = try run(db, "SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", [id,id]).first else { throw LibraryFailure.missing }
             let story = try decode(row[0]), sid = row[1], revision = story["revision"] as? Int ?? 0
@@ -106,14 +124,27 @@ extension StoryStore {
                 guard let notes = value as? String, notes.unicodeScalars.count <= 12000 else { throw LibraryFailure.invalid("notes too long") }
                 state["notes"] = notes
             }
-            if change["generate"] as? Bool == true || change["drafts"] != nil {
+            var platforms = state["platforms"] as! [String: [String: Any]]
+            if change["generate"] as? Bool == true || change["drafts"] != nil || change["draft_patch"] != nil {
                 do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; drafting is disabled.") }
-                let value = change["generate"] as? Bool == true ? LibraryModel.templates(story) : change["drafts"]
+                let previousDrafts = state["drafts"] as? [String: String] ?? [:]
+                var value: Any? = change["generate"] as? Bool == true ? LibraryModel.templates(story) : change["drafts"]
+                if let patchValue = change["draft_patch"] {
+                    guard let patch = patchValue as? [String: String], !patch.isEmpty, Set(patch.keys).isSubset(of: Set(LibraryModel.fields.keys)) else { throw LibraryFailure.invalid("invalid draft patch") }
+                    var updated = Dictionary(uniqueKeysWithValues: LibraryModel.fields.keys.map { ($0, previousDrafts[$0] ?? "") })
+                    updated.merge(patch) { _, new in new }; value = updated
+                }
                 guard let drafts = value as? [String: String], Set(drafts.keys) == Set(LibraryModel.fields.keys),
                       drafts.allSatisfy({ $0.value.unicodeScalars.count <= LibraryModel.fields[$0.key]! }) else { throw LibraryFailure.invalid("all five bounded draft fields are required") }
                 if let post = drafts["x_post"], !post.isEmpty,
                    try XText.request(["op": "measure", "text": post])["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
-                state["drafts"] = drafts; state["source_revision"] = revision; state["status"] = "draft"; state["approved_revision"] = NSNull()
+                for (name, fields) in LibraryModel.platforms {
+                    if change["generate"] as? Bool == true || fields.contains(where: { drafts[$0] != (previousDrafts[$0] ?? "") }) {
+                        platforms[name] = ["status": "draft", "approved_revision": NSNull()]
+                    }
+                }
+                state["drafts"] = drafts; state["source_revision"] = revision; state["status"] = LibraryModel.aggregate(platforms)
+                if state["status"] as? String != "approved" { state["approved_revision"] = NSNull() }
             }
             if let value = change["status"] {
                 guard let status = value as? String, LibraryModel.states.contains(status) else { throw LibraryFailure.invalid("invalid editorial status") }
@@ -125,7 +156,25 @@ extension StoryStore {
                     state["approved_revision"] = revision
                 } else { state["approved_revision"] = NSNull() }
                 state["status"] = status
+                platforms = Dictionary(uniqueKeysWithValues: LibraryModel.platforms.keys.map { ($0, ["status": status, "approved_revision": state["approved_revision"] ?? NSNull()]) })
             }
+            if let value = change["platform_status"] {
+                guard let decisions = value as? [String: String], !decisions.isEmpty, Set(decisions.keys).isSubset(of: Set(LibraryModel.platforms.keys)) else { throw LibraryFailure.invalid("invalid platform decision") }
+                for (name, status) in decisions {
+                    guard LibraryModel.states.contains(status) else { throw LibraryFailure.invalid("invalid platform status") }
+                    if status == "approved" {
+                        do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; approval is disabled.") }
+                        let drafts = state["drafts"] as? [String: String] ?? [:]
+                        guard LibraryModel.platforms[name]!.allSatisfy({ !(drafts[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { throw LibraryFailure.invalid("complete this platform's draft before approval") }
+                        if name == "x", try XText.request(["op": "measure", "text": drafts["x_post"] ?? ""])["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
+                    }
+                    platforms[name] = ["status": status, "approved_revision": status == "approved" ? revision : NSNull()]
+                }
+                state["status"] = LibraryModel.aggregate(platforms)
+                state["approved_revision"] = state["status"] as? String == "approved" ? revision : NSNull()
+                if state["status"] as? String == "approved" { state["source_revision"] = revision }
+            }
+            state["platforms"] = platforms
             state["version"] = (state["version"] as? Int ?? 0) + 1
             state["updated_at"] = ISO8601DateFormatter().string(from: Date())
             try run(db, "INSERT OR REPLACE INTO editorial VALUES (?,?)", [sid, try encode(state)])
@@ -164,6 +213,7 @@ extension StoryStore {
         if urls.isEmpty { urls = [story["url"] as? String ?? ""] }
         return ["schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": (story["editorial"] as? [String: Any])?["status"] as? String == "approved", "source_urls": urls,
+                "platform_approvals": (story["editorial"] as? [String: Any])?["platforms"] ?? [:],
                 "videobot": ["action": "inspect", "urls": urls, "instructions": "Paste these source URLs into VideoBot Inspect URLs, review discovered media, then choose what to queue. No media availability or reuse permission is implied."],
                 "rights": "unknown; review each source before reuse", "publishing": "manual only"]
     }
