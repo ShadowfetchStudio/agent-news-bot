@@ -84,37 +84,27 @@ The adapter is original MIT code; no AGPL platform code was copied. World Monito
 hosted service have different licenses. [License](https://github.com/koala73/worldmonitor/blob/main/docs/license.mdx),
 [hosted outputs agreement](https://github.com/koala73/worldmonitor/blob/main/docs/eula.mdx), and
 upstream publisher rights still apply. API access alone is not permission to republish an article.
+See [data rights and retention boundaries](DATA_RIGHTS.md): the persistent journal and backup-gated archival tools do not implement hosted-output expiry or deletion across exports/backups.
 
 ## Reliable agent consumption
 
 All endpoints use the existing bridge bearer token. `GET /v1/fresh` remains a snapshot for existing
 clients. Repeating that call can return the same stories. For durable processing:
 
-1. GET `/v1/events?consumer=video-research&limit=100`.
-2. Process events in sequence. The response includes `cursor`, `next_cursor` and `events`;
-   each event contains `seq` and a complete `story` revision, including `sources`.
-3. After successful processing, POST `/v1/events/ack?consumer=video-research&through=<next_cursor>`.
-4. Repeat until `count` is zero. After a crash, unacknowledged events are replayed.
+1. Read `/v1/capabilities` and inspect the retained-history boundary before onboarding.
+2. Create a named consumer with an explicit start (`history`, `date`, `retained` or `now`) and retain its returned generation. History/date choices can be rejected after archival pruning; `retained` explicitly accepts the available scope.
+3. GET `/v1/events?consumer=video-research&limit=100` and process the ordered events idempotently.
+4. Acknowledge only the contiguous successfully committed range with the current generation (and lease token if acquired). Fetching does not acknowledge anything. An acknowledgement cannot exceed the previously offered range.
+5. After interruption, read status and replay unacknowledged work. Generation checks fence stale administration, and optional leases coordinate competing workers.
 
-This is **at-least-once** delivery. Use `seq` as the idempotency key for work performed by that
-consumer. Only acknowledge the contiguous prefix you successfully processed, not the entire
-page if a middle event failed. An acknowledgement cannot exceed the highest sequence previously
-offered to that consumer; older repeated acknowledgements never move the cursor backwards.
-Different consumers do not consume one another's events. Serialize workers using the same name;
-this first version does not lease jobs among multiple workers sharing one consumer.
-
-Consumer names accept 1–64 ASCII letters, digits, dots, underscores or hyphens. The first call
-starts at the beginning of the retained journal. Limits are 1–500. New endpoints return 400 for
-invalid parameters, 401 without authentication, 405 for the wrong GET/POST method and 503 if
-story storage is unavailable. Errors never acknowledge an event.
+This is **at-least-once** delivery, not exactly-once publishing. Separate consumer names have independent progress. Use the [complete consumer contract and reference client](CONSUMER_RECOVERY.md) for exact request bodies, replay/reset behavior, lease renewal and downstream side-effect handling. Legacy generation-zero clients retain their compatibility path until explicitly configured; new integrations should use generation-bound administration.
 
 ## Grouping, updates and storage
 
 `stories.sqlite` is separate from the existing `seen.sqlite`; upgrading preserves both existing
 application data and installation. Initially fetched articles seed the new journal even if the
 legacy ledger had seen them. The journal retains story payloads, source metadata, immutable
-revisions and consumer cursors; no automatic history pruning is performed in this first version.
-Back it up with SQLite's backup API (or stop the service and copy the database plus WAL state).
+revisions and consumer cursors. Use the [research backup/verification/restore commands](RESEARCH_RECOVERY.md) for a verified independent archive. [Explicit archival maintenance](HISTORY_RETENTION.md) can remove eligible old events only after backup verification and consumer/protected-evidence checks; no automatic history pruning or total storage cap is implied.
 
 Canonical URL identity is authoritative for source updates. Similar headline tokens can join a
 story among the 500 most recently observed groups within 48 hours. Financial quotes, forecasts

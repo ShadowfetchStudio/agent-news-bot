@@ -59,7 +59,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
 - [ ] Private file permissions, dependency constraints and vulnerability scan.
 - [x] Total provider deadline and circuit breaker.
-- [ ] Hosted data permissions documented separately from code licensing.
+- [x] Hosted data permissions documented separately from code licensing (documentation only; no account or publication clearance).
 
 ## Release evidence
 
@@ -321,3 +321,8 @@ Native retention-display follow-up: expanded the retained revisions in the actua
 - Bounded synthetic trial on Mac and native Pop!_OS: 32 subscriptions, 200 stories, five revisions each (1,000 events), exactly 6,400 coalesced inbox rows. Warm per-200-story revision batches took 0.22–0.46 s on Mac and 0.37–0.77 s on Linux; reading 100 rows took about 4 ms and 6 ms respectively. This is not sustained production/concurrent-load acceptance. Reproducible fixture and measurements: `audits/2026-11-27/evidence/alerts_load.py`, `alerts-load-mac.json` and `alerts-load-linux.json`.
 
 Broader configuration/export recovery, operator storage controls, complete accessibility and real integrations, final packaging/publication and the final requirement audit remain open. This batch does not declare the overall release complete.
+
+
+## Hosted-output documentation review
+
+Reviewed upstream World Monitor licensing/EULA documentation on 2026-11-27 and added `DATA_RIGHTS.md`. It distinguishes independently implemented connector code, hosted-plan/output permissions and publisher rights. It explicitly records that durable current/history data, protected events, archives and exports do not implement hosted-output expiry. No hosted-account rights or production compliance are asserted. Updated the connector guide's obsolete pre-generation/no-leases example to point to the delivered consumer contract. This is a documentation closure, not an authenticated hosted-service acceptance.

@@ -384,8 +384,7 @@ Like this project? You can [buy me a coffee](https://www.buymeacoffee.com/shadow
 ## License
 
 **MIT** (see [LICENSE](LICENSE)). The project uses only system frameworks on macOS and
-permissively-licensed Python dependencies (`feedparser`, `requests`), so there is no copyleft
-obligation. The World Monitor connector is independently implemented against its REST contract and embeds no World Monitor platform code. Source-code licensing does not grant rights to upstream news or hosted-service outputs; each provider's terms govern that use.
+permissively licensed runtime dependencies, whose individual notices remain applicable. The World Monitor connector is independently implemented against its REST contract and embeds no World Monitor platform code. Source-code licensing does not grant rights to upstream news or hosted-service outputs; each provider's terms govern that use. See [code versus hosted-output and source rights](docs/DATA_RIGHTS.md), including the research journal's retention limitations.
 
 ### Credential and skill safety
 
