@@ -16,6 +16,8 @@ struct GroupRepairView: View {
     @State private var confirming = false
     @State private var finished = false
     @State private var operationID = UUID().uuidString
+    @State private var searchQuery = ""
+    @State private var searchCandidates: [(id: String, title: String, source: String)] = []
     private var sources: [[String: Any]] { source["sources"] as? [[String: Any]] ?? [] }
     private var canApply: Bool {
         !busy && !finished && source["merged_into"] == nil && !source.isEmpty &&
@@ -38,20 +40,51 @@ struct GroupRepairView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if action == "split" {
-                        Text("Select the reports to move. At least one must remain in the original group.").font(.caption)
-                        ForEach(sources.indices, id: \.self) { i in
-                            let url = sources[i]["url"] as? String ?? ""
-                            Toggle(isOn: Binding(get: { chosen.contains(url) }, set: { if $0 { chosen.insert(url) } else { chosen.remove(url) } })) {
-                                VStack(alignment: .leading) {
-                                    Text(sources[i]["title"] as? String ?? "Untitled report")
-                                    Text(url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                                }
-                            }.disabled(busy || finished)
+                        if sources.count < 2 {
+                            Text("This story has only \(sources.count) source report. At least 2 sources are required to split a group. Switch to Merge to combine it with another story.")
+                                .font(.callout).foregroundStyle(.orange)
+                        } else {
+                            Text("Select the reports to move. At least one must remain in the original group.").font(.caption)
+                            ForEach(sources.indices, id: \.self) { i in
+                                let url = sources[i]["url"] as? String ?? ""
+                                Toggle(isOn: Binding(get: { chosen.contains(url) }, set: { if $0 { chosen.insert(url) } else { chosen.remove(url) } })) {
+                                    VStack(alignment: .leading) {
+                                        Text(sources[i]["title"] as? String ?? "Untitled report")
+                                        Text(url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                    }
+                                }.disabled(busy || finished)
+                            }
+                            Text("\(chosen.count) move to a new group; \(sources.count - chosen.count) stay. The new group starts without drafts.").font(.caption)
                         }
-                        Text("\(chosen.count) move to a new group; \(sources.count - chosen.count) stay. The new group starts without drafts.").font(.caption)
                     } else {
+                        TextField("Search retained stories by title or source…", text: $searchQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(busy || finished)
+                        if !searchCandidates.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(searchCandidates, id: \.id) { candidate in
+                                    Button {
+                                        targetID = candidate.id
+                                        Task { await loadTarget() }
+                                    } label: {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(candidate.title).font(.callout).lineLimit(1)
+                                                Text("\(candidate.source) · \(candidate.id.prefix(10))…").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            if targetID == candidate.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.gold) }
+                                        }
+                                        .padding(6)
+                                        .background(targetID == candidate.id ? Theme.gold.opacity(0.15) : Color.secondary.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
                         HStack {
-                            TextField("Destination story ID (from Story tab or library API)", text: $targetID).textFieldStyle(.roundedBorder)
+                            TextField("Or paste destination story ID", text: $targetID).textFieldStyle(.roundedBorder)
                                 .disabled(busy || finished).onChange(of: targetID) { _, _ in target = [:] }
                             Button("Load destination") { Task { await loadTarget() } }.disabled(busy || finished || targetID.isEmpty)
                         }
@@ -79,6 +112,21 @@ struct GroupRepairView: View {
             }
         }.padding(20).frame(width: 790, height: 650)
         .task { await loadSource() }
+        .task(id: searchQuery) {
+            let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !q.isEmpty else { searchCandidates = []; return }
+            do { try await Task.sleep(nanoseconds: 180_000_000) } catch { return }
+            let db = store, currentID = storyID
+            let found = await Task.detached { () -> [(String, String, String)] in
+                guard let page = try? db.library(["q": q, "limit": "6", "include_merged": "false"]),
+                      let stories = page["stories"] as? [[String: Any]] else { return [] }
+                return stories.compactMap { row in
+                    guard let id = row["id"] as? String, id != currentID, row["merged_into"] == nil else { return nil }
+                    return (id, row["title"] as? String ?? "Untitled", row["source"] as? String ?? "")
+                }
+            }.value
+            searchCandidates = found
+        }
         .confirmationDialog("Apply this \(action) and require editorial review?", isPresented: $confirming, titleVisibility: .visible) {
             Button("Apply \(action)") { Task { await apply() } }
         } message: {
@@ -97,6 +145,7 @@ struct GroupRepairView: View {
         source = [:]
         do {
             source = try await read(storyID); chosen = []; target = [:]; operationID = UUID().uuidString
+            if sources.count < 2 { action = "merge" }
             message = source["merged_into"] == nil ? "" : "This group was already merged into \(source["merged_into"] as? String ?? ""). Open that story to repair it."
         } catch { message = "Could not load the story. Reload before making changes." }
     }

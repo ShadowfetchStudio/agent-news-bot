@@ -3,6 +3,7 @@ import SwiftUI
 private struct OperatorSnapshot: @unchecked Sendable { let value: [String: Any] }
 
 struct OperatorControlsView: View {
+    var reloadToken: Int = 0
     @EnvironmentObject private var engine: NewsEngine
     @State private var report: [String: Any] = [:]
     @State private var ceiling = ""
@@ -16,7 +17,7 @@ struct OperatorControlsView: View {
     private var changed: Bool {
         ceiling != String((policy["max_journal_bytes"] ?? 0)/1048576) || reserve != String((policy["min_free_bytes"] ?? 0)/1048576)
     }
-    private func bytes(_ key: String) -> String { ByteCountFormatter.string(fromByteCount: Int64(storage[key] as? Int ?? 0), countStyle: .file) }
+    private func bytes(_ key: String) -> String { ByteCountFormatter.string(fromByteCount: Int64(storage[key] as? Int ?? 0), countStyle: .binary) }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -75,7 +76,7 @@ struct OperatorControlsView: View {
                 }
             }
         }.padding(12).anbCard().disabled(busy)
-            .task { await reload() }
+            .task(id: reloadToken) { await reload() }
             .confirmationDialog("Discard unsaved storage limits and reload?", isPresented: $confirmReload) {
                 Button("Discard and reload", role: .destructive) { Task { await reload() } }
                 Button("Cancel", role: .cancel) { }

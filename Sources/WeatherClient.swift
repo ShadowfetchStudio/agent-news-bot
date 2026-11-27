@@ -16,8 +16,14 @@ enum WeatherClient {
         }
 
         do {
-            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-            let geoURL = URL(string: "https://geocoding-api.open-meteo.com/v1/search?name=\(encoded)&count=1&language=en&format=json")!
+            var geoParts = URLComponents(string: "https://geocoding-api.open-meteo.com/v1/search")!
+            geoParts.queryItems = [
+                URLQueryItem(name: "name", value: query),
+                URLQueryItem(name: "count", value: "1"),
+                URLQueryItem(name: "language", value: "en"),
+                URLQueryItem(name: "format", value: "json")
+            ]
+            guard let geoURL = geoParts.url else { throw URLError(.badURL) }
             let geo = try await Net.json(from: geoURL)
             guard
                 let results = (geo as? [String: Any])?["results"] as? [[String: Any]],
@@ -32,9 +38,19 @@ enum WeatherClient {
             let country = (first["country"] as? String) ?? ""
             let place = [name, admin, country].filter { !$0.isEmpty }.joined(separator: ", ")
 
-            let wxURL = URL(string:
-                "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=2&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto"
-            )!
+            var wxParts = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
+            wxParts.queryItems = [
+                URLQueryItem(name: "latitude", value: String(lat)),
+                URLQueryItem(name: "longitude", value: String(lon)),
+                URLQueryItem(name: "current", value: "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation"),
+                URLQueryItem(name: "daily", value: "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"),
+                URLQueryItem(name: "forecast_days", value: "2"),
+                URLQueryItem(name: "temperature_unit", value: "fahrenheit"),
+                URLQueryItem(name: "wind_speed_unit", value: "mph"),
+                URLQueryItem(name: "precipitation_unit", value: "inch"),
+                URLQueryItem(name: "timezone", value: "auto")
+            ]
+            guard let wxURL = wxParts.url else { throw URLError(.badURL) }
             let wx = try await Net.json(from: wxURL) as? [String: Any]
             guard let current = wx?["current"] as? [String: Any],
                   current["temperature_2m"] is NSNumber, current["weather_code"] is NSNumber,

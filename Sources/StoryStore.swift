@@ -5,11 +5,13 @@ import SQLite3
 final class StoryStore: @unchecked Sendable {
     let path: URL
     private let lock = NSLock()
+    private var initialized = false
     init(path: URL) { self.path = path }
     enum Failure: Error { case database, invalidConsumer, invalidLimit, invalidAcknowledgement }
 
-    func withDB<T>(_ work: (OpaquePointer) throws -> T) throws -> T {
+    func withDB<T>(readOnly: Bool = false, _ work: (OpaquePointer) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
+        if !FileManager.default.fileExists(atPath: path.path) { initialized = false }
         do { try AppPaths.prepareDatabase(path) } catch { throw Failure.database }
         var handle: OpaquePointer?
         guard sqlite3_open(path.path, &handle) == SQLITE_OK, let db = handle else {
@@ -17,33 +19,41 @@ final class StoryStore: @unchecked Sendable {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 5000)
-        try run(db, "PRAGMA journal_mode=WAL")
-        for sql in [
-            "CREATE TABLE IF NOT EXISTS stories(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated REAL NOT NULL)",
-            "CREATE INDEX IF NOT EXISTS stories_updated ON stories(updated)",
-            "CREATE TABLE IF NOT EXISTS members(url TEXT PRIMARY KEY, story_id TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT, story_id TEXT NOT NULL, payload TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL DEFAULT 0, offered INTEGER NOT NULL DEFAULT 0)",
-            "CREATE INDEX IF NOT EXISTS events_story_seq ON events(story_id,seq)",
-            "CREATE TABLE IF NOT EXISTS identity_aliases(alias TEXT PRIMARY KEY, story_id TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY)",
-            "CREATE TABLE IF NOT EXISTS editorial(story_id TEXT PRIMARY KEY,payload TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
-        ] { try run(db, sql) }
-        try run(db, ConsumerSchema.sql)
-        try run(db, RetentionSchema.sql)
-        for sql in AlertSchema.sql { try run(db, sql) }
-        try run(db, "CREATE TABLE IF NOT EXISTS group_repairs(id TEXT PRIMARY KEY,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)")
-        try run(db, "BEGIN IMMEDIATE")
-        do {
-            if try run(db, "SELECT 1 FROM migrations WHERE name='canonical-v2'").isEmpty {
-                for row in try run(db, "SELECT url,story_id FROM members ORDER BY url") {
-                    let normalized = CanonicalURL.fingerprint(row[0])
-                    try run(db, "INSERT OR IGNORE INTO members VALUES (?,?)", [normalized, row[1]])
-                    try run(db, "INSERT OR IGNORE INTO identity_aliases VALUES (?,?)", [FreshnessStore.articleID(url: normalized, fallback: ""), row[1]])
+        try run(db, "PRAGMA trusted_schema=OFF")
+        if !initialized {
+            try run(db, "PRAGMA journal_mode=WAL")
+            for sql in [
+                "CREATE TABLE IF NOT EXISTS stories(id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated REAL NOT NULL)",
+                "CREATE INDEX IF NOT EXISTS stories_updated ON stories(updated)",
+                "CREATE TABLE IF NOT EXISTS members(url TEXT PRIMARY KEY, story_id TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT, story_id TEXT NOT NULL, payload TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL DEFAULT 0, offered INTEGER NOT NULL DEFAULT 0)",
+                "CREATE INDEX IF NOT EXISTS events_story_seq ON events(story_id,seq)",
+                "CREATE TABLE IF NOT EXISTS identity_aliases(alias TEXT PRIMARY KEY, story_id TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY)",
+                "CREATE TABLE IF NOT EXISTS editorial(story_id TEXT PRIMARY KEY,payload TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
+            ] { try run(db, sql) }
+            try run(db, ConsumerSchema.sql)
+            try run(db, RetentionSchema.sql)
+            for sql in AlertSchema.sql { try run(db, sql) }
+            try run(db, "CREATE TABLE IF NOT EXISTS group_repairs(id TEXT PRIMARY KEY,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)")
+            try run(db, "BEGIN IMMEDIATE")
+            do {
+                if try run(db, "SELECT 1 FROM migrations WHERE name='canonical-v2'").isEmpty {
+                    for row in try run(db, "SELECT url,story_id FROM members ORDER BY url") {
+                        let normalized = CanonicalURL.fingerprint(row[0])
+                        try run(db, "INSERT OR IGNORE INTO members VALUES (?,?)", [normalized, row[1]])
+                        try run(db, "INSERT OR IGNORE INTO identity_aliases VALUES (?,?)", [FreshnessStore.articleID(url: normalized, fallback: ""), row[1]])
+                    }
+                    try run(db, "INSERT INTO migrations VALUES ('canonical-v2')")
                 }
-                try run(db, "INSERT INTO migrations VALUES ('canonical-v2')")
-            }
+                try run(db, "COMMIT")
+                initialized = true
+            } catch { _ = try? run(db, "ROLLBACK"); throw error }
+        }
+        try run(db, readOnly ? "BEGIN DEFERRED" : "BEGIN IMMEDIATE")
+        do {
             let value = try work(db)
             try run(db, "COMMIT")
             return value
@@ -243,11 +253,11 @@ final class StoryStore: @unchecked Sendable {
     }
 
     func story(_ id: String) throws -> [String: Any]? {
-        try withDB { db in try run(db, "SELECT payload FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", [id, id]).first.map { try decode($0[0]) } }
+        try withDB(readOnly: true) { db in try run(db, "SELECT payload FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", [id, id]).first.map { try decode($0[0]) } }
     }
     func revisions(_ id: String, limit: Int = 50) throws -> [[String: Any]] {
         guard (1...100).contains(limit) else { throw Failure.invalidLimit }
-        return try withDB { db in
+        return try withDB(readOnly: true) { db in
             let rows = try run(db, "SELECT seq,payload FROM events WHERE story_id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?)) ORDER BY seq DESC LIMIT ?", [id, id, String(limit + 1)]).reversed()
             var previous: [String: Any] = [:], result: [[String: Any]] = []
             for row in rows {

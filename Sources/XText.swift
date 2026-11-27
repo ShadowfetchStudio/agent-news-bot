@@ -1,20 +1,26 @@
 import Foundation
 import JavaScriptCore
+import CryptoKit
 
 // JavaScriptCore is built into macOS. Only the pinned bundled parser is evaluated.
 // The serial queue confines the context and all JSValue accesses to one executor.
 enum XText {
     private static let queue = DispatchQueue(label: "ai.shadowfetch.newsbot.xtext")
+    private static let pinnedSHA256 = "d78527672d77392b1f8c342f9e774102910dc719ae2e4fb3c27df7af70310cf5"
     private static var context: JSContext?
     enum Failure: Error { case missingParser, invalidDraft }
 
     static func request(_ value: [String: Any]) throws -> [String: Any] {
-        try queue.sync {
+        if let text = value["text"] as? String, text.unicodeScalars.count > 32768 { throw Failure.invalidDraft }
+        return try queue.sync {
             if context == nil {
                 let paths = [Bundle.main.resourceURL?.appendingPathComponent("twitter-text.js"),
                     URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("twitter-text.js")]
                 guard let path = paths.compactMap({ $0 }).first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-                      let source = try? String(contentsOf: path, encoding: .utf8), let js = JSContext() else { throw Failure.missingParser }
+                      let rawData = try? Data(contentsOf: path),
+                      SHA256.hash(data: rawData).map({ String(format: "%02x", $0) }).joined() == pinnedSHA256,
+                      let source = String(data: rawData, encoding: .utf8),
+                      let js = JSContext() else { throw Failure.missingParser }
                 js.evaluateScript(source)
                 guard js.exception == nil else { throw Failure.missingParser }
                 context = js

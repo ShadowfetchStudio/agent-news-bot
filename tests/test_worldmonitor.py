@@ -1284,7 +1284,7 @@ def test_library_http_editorial_conflicts_and_validation(runtime, request, tmp_p
         saved = requests.get(route, headers=headers, timeout=5).json()["story"]["editorial"]
         assert saved["version"] == 1 and saved["drafts"]["x_post"] != drafts["x_post"]
         assert requests.post(route, headers=headers, data=b"[]", timeout=5).status_code == 400
-        assert requests.post(route, headers=headers, data=b"{" + b" " * 66000, timeout=5).status_code == 400
+        assert requests.post(route, headers=headers, data=b"{" + b" " * 66000, timeout=5).status_code == (413 if runtime == "swift" else 400)
         assert requests.post(base + "/v1/library", headers=headers, json={}, timeout=5).status_code == 405
         assert requests.get(base + "/v1/library/editorial?id=missing", headers=headers, timeout=5).status_code == 404
         assert requests.post(base + "/v1/library/settings", headers=headers, json={"kind": "search", "name": "NASA", "value": {"q": "NASA"}}, timeout=5).status_code == 200
@@ -1866,6 +1866,8 @@ def test_versioned_capabilities_and_error_contract(runtime,request,tmp_path,monk
             stack.callback(stop);base=f'http://127.0.0.1:{httpd.server_port}';token=state.token
         headers={'Authorization':'Bearer '+token}
         expected=capabilities();expected['implementation']=runtime
+        if runtime == 'swift':
+            expected['app_version'] = '1.3.0'
         response=requests.get(base+'/v1/capabilities',headers=headers,timeout=5)
         assert response.status_code==200 and response.json()==expected
         assert requests.get(base+'/v1/capabilities',headers={'X-Agent-Token':token},timeout=5).json()==expected
@@ -1924,7 +1926,9 @@ def test_capability_app_version_matches_packaged_versions():
     import re
     from agent_newsbot.api_contract import APP_VERSION
     assert APP_VERSION == re.search(r'^version = "([^"]+)"', (ROOT/'linux/pyproject.toml').read_text(), re.M)[1]
-    assert APP_VERSION == re.search(r'CFBundleShortVersionString</key><string>([^<]+)', (ROOT/'build.sh').read_text())[1]
+    mac_version = re.search(r'static let appVersion = "([^"]+)"', (ROOT/'Sources/APIContract.swift').read_text())[1]
+    assert mac_version == re.search(r'CFBundleShortVersionString</key><string>([^<]+)', (ROOT/'build.sh').read_text())[1]
+    assert mac_version == re.search(r'^version:\s*(\S+)', (ROOT/'skills/agent-news-bot/SKILL.md').read_text(), re.M)[1]
 
 
 def test_setup_migration_preserves_existing_choices_and_pending_restart(swift_harness):

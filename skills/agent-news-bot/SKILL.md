@@ -1,14 +1,14 @@
 ---
 name: agent-news-bot
 description: Pull new and updated news from the local Agent News Bot Mac app (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Agent News Bot
 
 Agent News Bot is a native macOS newsroom. It keeps a local SQLite freshness ledger (with 30-day retention, `ETag`/`If-Modified-Since` RSS caching, and conservative equivalent-wording grouping) and exposes a repeatable fresh snapshot plus a durable story/event journal.
 
-Use **Settings → Agent bridge → Install agent skills** to create descriptors (existing files are preserved) at `~/.hermes/skills/agent-news-bot/SKILL.md` and `~/.agents/skills/agent-news-bot/SKILL.md` referencing the `0600` token file (never embedding the raw token in plaintext):
+Use **Settings → Agent bridge → Install agent skills** (or **Update existing skills…** to refresh older copies) to create descriptors at `~/.hermes/skills/agent-news-bot/SKILL.md` and `~/.agents/skills/agent-news-bot/SKILL.md` referencing the `0600` token file (never embedding the raw token in plaintext):
 
 ```text
 ~/Library/Application Support/AgentNewsBot/bridge.token
@@ -16,9 +16,25 @@ Use **Settings → Agent bridge → Install agent skills** to create descriptors
 
 ## Default endpoints
 
-- `GET http://127.0.0.1:18765/health` (no auth)
+- `GET http://127.0.0.1:18765/health` (no auth; returns `ok`, `app`, `pid`, `bridge`)
+- `GET http://127.0.0.1:18765/v1/capabilities`
 - `GET http://127.0.0.1:18765/v1/fresh?desk=<desk>&limit=<n>`
 - `GET http://127.0.0.1:18765/v1/articles/<id>`
+- `GET http://127.0.0.1:18765/v1/stories/<id>`
+- `GET http://127.0.0.1:18765/v1/stories/<id>/revisions?limit=50`
+- `GET http://127.0.0.1:18765/v1/events?consumer=<name>&limit=100`
+- `POST http://127.0.0.1:18765/v1/events/ack?consumer=<name>&through=<seq>&generation=<n>`
+- `GET/POST http://127.0.0.1:18765/v1/consumers`
+- `GET http://127.0.0.1:18765/v1/sources`
+- `GET http://127.0.0.1:18765/v1/operations`
+- `GET http://127.0.0.1:18765/v1/library`
+- `GET/POST http://127.0.0.1:18765/v1/library/storage`
+- `GET/POST http://127.0.0.1:18765/v1/library/settings`
+- `GET/POST http://127.0.0.1:18765/v1/library/alerts`
+- `GET/POST http://127.0.0.1:18765/v1/library/editorial?id=<id>`
+- `GET http://127.0.0.1:18765/v1/library/brief?id=<id>`
+- `GET http://127.0.0.1:18765/v1/library/export?id=<id>`
+- `GET/POST http://127.0.0.1:18765/v1/library/repairs`
 - `GET http://127.0.0.1:18765/v1/desks`
 - `GET http://127.0.0.1:18765/v1/status`
 - `POST http://127.0.0.1:18765/v1/fetch`

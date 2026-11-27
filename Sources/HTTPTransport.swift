@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum HTTPTransport {
     struct Failure: LocalizedError {
@@ -36,7 +37,7 @@ enum HTTPTransport {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = max(0.1, timeout)
         configuration.timeoutIntervalForResource = max(0.1, timeout)
-        let session = URLSession(configuration: configuration, delegate: RedirectPolicy(allowed: redirects), delegateQueue: nil)
+        let session = URLSession(configuration: configuration, delegate: RedirectPolicy(allowed: redirects, initialURL: url), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
@@ -54,16 +55,81 @@ enum HTTPTransport {
 
 private final class RedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     let allowed: Bool
+    let initialLoopback: Bool
     private var count = 0
-    init(allowed: Bool) { self.allowed = allowed }
+    init(allowed: Bool, initialURL: URL) {
+        self.allowed = allowed
+        self.initialLoopback = Self.isLoopbackHost(initialURL.host)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         count += 1
-        let downgrade = response.url?.scheme == "https" && request.url?.scheme != "https"
+        let fromScheme = response.url?.scheme?.lowercased() ?? ""
+        let toScheme = request.url?.scheme?.lowercased() ?? ""
+        let downgrade = fromScheme == "https" && toScheme != "https"
         guard allowed, count <= 5, !downgrade, let url = request.url,
-              ["http", "https"].contains(url.scheme ?? ""), url.user == nil, url.password == nil else {
+              ["http", "https"].contains(toScheme), let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil else {
             completionHandler(nil); return
         }
-        completionHandler(request)
+        // Block remote feeds from redirecting to loopback, private LAN, link-local, or cloud metadata IPs.
+        if !initialLoopback && !Self.isPublicHost(host) {
+            completionHandler(nil); return
+        }
+        var sanitized = request
+        let crossOrigin = response.url?.scheme?.lowercased() != toScheme
+            || response.url?.host?.lowercased() != host.lowercased()
+            || response.url?.port != url.port
+        if crossOrigin {
+            sanitized.setValue(nil, forHTTPHeaderField: "Authorization")
+            sanitized.setValue(nil, forHTTPHeaderField: "Cookie")
+        }
+        completionHandler(sanitized)
+    }
+
+    private static func isLoopbackHost(_ host: String?) -> Bool {
+        guard let h = host?.lowercased() else { return false }
+        return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(h)
+    }
+
+    private static func isPublicHost(_ host: String) -> Bool {
+        let trimmed = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        if trimmed == "localhost" || trimmed.hasSuffix(".local") || trimmed.hasSuffix(".internal") { return false }
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        var result: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(trimmed, nil, &hints, &result) == 0, let first = result else { return false }
+        defer { freeaddrinfo(first) }
+        var cursor: UnsafeMutablePointer<addrinfo>? = first
+        var sawAny = false
+        while let info = cursor {
+            sawAny = true
+            if info.pointee.ai_family == AF_INET, let sa = info.pointee.ai_addr {
+                let addr = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
+                let ip = UInt32(bigEndian: addr)
+                let a = (ip >> 24) & 0xFF, b = (ip >> 16) & 0xFF
+                if a == 0 || a == 10 || a == 127 || (a == 100 && (b & 0xC0) == 64) ||
+                   (a == 169 && b == 254) || (a == 172 && (b & 0xF0) == 16) ||
+                   (a == 192 && b == 168) || a >= 224 { return false }
+            } else if info.pointee.ai_family == AF_INET6, let sa = info.pointee.ai_addr {
+                let bytes = withUnsafeBytes(of: sa.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_addr }) { Array($0) }
+                let isZero = bytes.allSatisfy { $0 == 0 }
+                let isLoopback = bytes.prefix(15).allSatisfy { $0 == 0 } && bytes[15] == 1
+                let isULA = (bytes[0] & 0xFE) == 0xFC
+                let isLinkLocal = bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80
+                let isMulticast = bytes[0] == 0xFF
+                let isV4Mapped = bytes.prefix(10).allSatisfy { $0 == 0 } && bytes[10] == 0xFF && bytes[11] == 0xFF
+                if isZero || isLoopback || isULA || isLinkLocal || isMulticast { return false }
+                if isV4Mapped {
+                    let a = UInt32(bytes[12]), b = UInt32(bytes[13])
+                    if a == 0 || a == 10 || a == 127 || (a == 169 && b == 254) ||
+                       (a == 172 && (b & 0xF0) == 16) || (a == 192 && b == 168) || a >= 224 { return false }
+                }
+            }
+            cursor = info.pointee.ai_next
+        }
+        return sawAny
     }
 }

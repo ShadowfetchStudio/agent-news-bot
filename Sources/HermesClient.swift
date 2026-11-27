@@ -112,7 +112,9 @@ enum HermesClient {
     @MainActor
     private static func apiRequest(settings: SettingsStore, path: String, timeout: TimeInterval) throws -> URLRequest {
         guard var parts = URLComponents(string: settings.hermesAPIURL),
-              ["http", "https"].contains(parts.scheme ?? ""), parts.host != nil,
+              let scheme = parts.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = parts.host?.lowercased(), !host.isEmpty,
+              scheme == "https" || ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else { throw URLError(.badURL) }
         var base = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if base.split(separator: "/").last != "v1" { base += base.isEmpty ? "v1" : "/v1" }
@@ -120,7 +122,11 @@ enum HermesClient {
         guard let url = parts.url else { throw URLError(.badURL) }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
-        if !settings.hermesToken.isEmpty { request.setValue("Bearer \(settings.hermesToken)", forHTTPHeaderField: "Authorization") }
+        if !settings.hermesToken.isEmpty {
+            guard settings.hermesToken.utf8.count <= 8192,
+                  settings.hermesToken.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value <= 126 }) else { throw URLError(.badURL) }
+            request.setValue("Bearer \(settings.hermesToken)", forHTTPHeaderField: "Authorization")
+        }
         return request
     }
 

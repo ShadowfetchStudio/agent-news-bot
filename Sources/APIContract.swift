@@ -1,7 +1,7 @@
 import Foundation
 
 enum APIContract {
-    static let appVersion = "1.2.0"
+    static let appVersion = "1.3.0"
     static let features = Dictionary(uniqueKeysWithValues: [
         "async_fetch", "durable_stories", "source_observations", "story_revisions", "consumer_delivery",
         "consumer_generations", "consumer_leases", "research_library", "editorial_drafts", "research_export",

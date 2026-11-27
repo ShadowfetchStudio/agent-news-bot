@@ -204,7 +204,7 @@ struct AgentStatus: Equatable {
 
 enum UserAgent {
     static let current =
-        "AgentNewsBot/1.1 (+https://github.com/ShadowfetchStudio/agent-news-bot; Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+        "AgentNewsBot/\(APIContract.appVersion) (+https://github.com/ShadowfetchStudio/agent-news-bot; Macintosh) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
 }
 
 struct ConditionalResponse {
@@ -272,9 +272,25 @@ enum HTMLText {
         text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         let entities: [(String, String)] = [
             ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""),
-            ("&#39;", "'"), ("&apos;", "'"), ("&nbsp;", " "), ("&#x27;", "'")
+            ("&#39;", "'"), ("&apos;", "'"), ("&nbsp;", " "), ("&#x27;", "'"),
+            ("&mdash;", "—"), ("&ndash;", "–"), ("&rsquo;", "’"), ("&lsquo;", "‘"),
+            ("&rdquo;", "”"), ("&ldquo;", "“"), ("&hellip;", "…"), ("&bull;", "•"),
+            ("&middot;", "·"), ("&copy;", "©"), ("&reg;", "®"), ("&trade;", "™")
         ]
         for (from, to) in entities { text = text.replacingOccurrences(of: from, with: to) }
+        if let regex = try? NSRegularExpression(pattern: "&#(x[0-9a-fA-F]+|[0-9]+);") {
+            let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed()
+            for match in matches {
+                guard let full = Range(match.range, in: text), let num = Range(match.range(at: 1), in: text) else { continue }
+                let token = text[num]
+                let code: UInt32? = token.hasPrefix("x") || token.hasPrefix("X")
+                    ? UInt32(token.dropFirst(), radix: 16)
+                    : UInt32(token, radix: 10)
+                if let code, let scalar = UnicodeScalar(code) {
+                    text.replaceSubrange(full, with: String(scalar))
+                }
+            }
+        }
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -38,7 +38,8 @@ from source; this release's downloadable Mac executable is ARM64 only.
   source URLs for a manual VideoBot handoff; media rights remain to be checked.
 - Durable per-consumer events, generation checks, replay/onboarding choices and
   optional worker leases. The reference consumer commits its local inbox before
-  acknowledgement and includes an explicit outbox pattern for external effects.
+  acknowledgement; downstream integrations with external side effects should add a
+  transactional outbox as documented in [consumer recovery](CONSUMER_RECOVERY.md).
 - First-run source setup, optional connection diagnostics, observable credentials,
   explicit skill installation, automatic Mac refresh and restored snapshots.
 - Bounded HTTP transfers, total provider deadlines, persistent source backoff,

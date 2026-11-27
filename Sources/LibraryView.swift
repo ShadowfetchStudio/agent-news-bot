@@ -61,9 +61,21 @@ struct LibraryView: View {
                 Toggle("Bookmarks", isOn: $bookmarked); Toggle("Include muted sources", isOn: $includeMuted); Toggle("Include merged history", isOn: $includeMerged)
                 Spacer()
                 Menu("Watchlists") {
-                    ForEach(preferences.filter { $0.kind == "search" }) { item in
-                        Button(item.name) { apply(item.filters); watchName = item.name }
-                        Button("Delete \(item.name)") { preference(kind: "search", name: item.name, value: NSNull()) }
+                    let saved = preferences.filter { $0.kind == "search" }
+                    if saved.isEmpty {
+                        Text("No saved watchlists")
+                    } else {
+                        ForEach(saved) { item in
+                            Button(item.name) { apply(item.filters); watchName = item.name }
+                        }
+                        Divider()
+                        Menu("Delete watchlist") {
+                            ForEach(saved) { item in
+                                Button("Delete \(item.name)", role: .destructive) {
+                                    preference(kind: "search", name: item.name, value: NSNull())
+                                }
+                            }
+                        }
                     }
                 }
                 TextField("Watchlist name", text: $watchName).frame(width: 150)
@@ -86,9 +98,13 @@ struct LibraryView: View {
             if busy { ProgressView().controlSize(.small) }
             List(rows, selection: $selected) { item in
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text(item.title).font(.headline); if item.bookmarked { Image(systemName: "bookmark.fill") } }
+                    HStack { Text(item.title).font(.headline); if item.bookmarked { Image(systemName: "bookmark.fill").foregroundStyle(Theme.gold) } }
                     Text("\(item.source) · \(item.status.replacingOccurrences(of: "_", with: " ")) · review priority \(item.priority)").font(.caption).foregroundStyle(.secondary)
-                }.padding(.vertical, 5).tag(item.id)
+                }
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { selected = item.id; editorID = item.id }
+                .tag(item.id)
             }
             HStack {
                 Button("Previous") { offset = max(0, offset - 50) }.disabled(offset == 0 || busy)
@@ -96,7 +112,10 @@ struct LibraryView: View {
                 Button("Next") { if let nextOffset { offset = nextOffset } }.disabled(nextOffset == nil || busy)
                 Spacer()
                 Button("Repair grouping…") { if let selected { repairID = selected } }.disabled(selected == nil)
-                Button("Open story and drafts") { if let selected { editorID = selected } }.disabled(selected == nil)
+                Button("Open story and drafts") { if let selected { editorID = selected } }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selected == nil)
             }
         }.padding(20).frame(minWidth: 1000, minHeight: 650)
         .sheet(isPresented:$showAlerts) { AlertsView(store:store) }
@@ -155,8 +174,17 @@ struct LibraryView: View {
         } catch is CancellationError {} catch { message = "Could not load the library: \(error.localizedDescription)" }
     }
     private func preference(kind: String, name: String, value: Any) {
-        do { _ = try store.librarySettings(kind: kind, name: name, value: value, write: true); refresh += 1 }
-        catch { message = "Could not save this preference." }
+        let db = store
+        let encodedValue = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
+        Task {
+            do {
+                try await Task.detached {
+                    let decoded: Any = encodedValue.flatMap { try? JSONSerialization.jsonObject(with: $0, options: [.fragmentsAllowed]) } ?? NSNull()
+                    _ = try db.librarySettings(kind: kind, name: name, value: decoded, write: true)
+                }.value
+                refresh += 1
+            } catch { message = "Could not save this preference." }
+        }
     }
 }
 
@@ -186,6 +214,10 @@ struct EditorialView: View {
     @State private var groupingDetails = ""
     @State private var savedBrief: [String: Any]?
     @State private var retired = false
+    @State private var busy = false
+    @State private var xWeightedLength: Int?
+    @State private var xValid = true
+    @State private var copiedField: String?
     private var fingerprint: String {
         let value: [String: Any] = ["notes": notes, "status": status, "bookmarked": bookmarked, "drafts": drafts]
         return (try? JSONSerialization.data(withJSONObject: value, options: .sortedKeys)).map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -230,16 +262,33 @@ struct EditorialView: View {
                 }.padding().tabItem { Text("Notes / sources") }
             }
             if !message.isEmpty { Text(message).font(.callout).textSelection(.enabled) }
+            if busy { ProgressView().controlSize(.small) }
             if dirty { Text("Unsaved changes. The brief and exports contain the last saved version.").font(.caption).foregroundStyle(.orange) }
             HStack {
-                Button("Reload saved version") { if dirty { pendingDiscard = "reload" } else { load() } }
-                Button(drafts.isEmpty ? "Generate draft templates" : "Regenerate templates…") { if drafts.isEmpty { save(generate: true) } else { confirmGenerate = true } }.disabled(retired)
+                Button("Reload saved version") { if dirty { pendingDiscard = "reload" } else { load() } }.disabled(busy)
+                Button(drafts.isEmpty ? "Generate draft templates" : "Regenerate templates…") { if drafts.isEmpty { save(generate: true) } else { confirmGenerate = true } }.disabled(retired || busy)
                 Spacer()
-                Button("Export saved research package") { exportPackage() }.disabled(!loaded || retired)
-                Button("Save changes") { save(generate: false) }.buttonStyle(.borderedProminent).disabled(!loaded || retired)
+                Button("Export saved research package") { exportPackage() }.disabled(!loaded || retired || busy)
+                Button("Save changes") { save(generate: false) }.buttonStyle(.borderedProminent).disabled(!loaded || retired || busy)
             }
         }.padding(20).frame(minWidth: 850, minHeight: 660)
         .onAppear { load() }
+        .task(id: drafts["x_post"] ?? "") {
+            let text = drafts["x_post"] ?? ""
+            if text.isEmpty { xWeightedLength = 0; xValid = true; return }
+            do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
+            let result = await Task.detached { () -> (Int, Bool)? in
+                guard let m = try? XText.request(["op": "measure", "text": text]) else { return nil }
+                return (m["weightedLength"] as? Int ?? 0, m["valid"] as? Bool ?? false)
+            }.value
+            if let result {
+                xWeightedLength = result.0
+                xValid = result.1
+            } else {
+                xWeightedLength = nil
+                xValid = false
+            }
+        }
         .interactiveDismissDisabled(dirty)
         .confirmationDialog("Discard unsaved changes?", isPresented: Binding(get: { pendingDiscard != nil }, set: { if !$0 { pendingDiscard = nil } })) {
             Button("Discard changes", role: .destructive) {
@@ -250,6 +299,15 @@ struct EditorialView: View {
         }
         .confirmationDialog("Replace the current drafts with templates from this revision?", isPresented: $confirmGenerate) {
             Button("Replace drafts", role: .destructive) { save(generate: true) }
+        }
+    }
+    private func copyDraft(_ text: String, field: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copiedField = field
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if copiedField == field { copiedField = nil }
         }
     }
     @ViewBuilder private func draftEditor(_ key: String, label: String, second: String? = nil) -> some View {
@@ -266,18 +324,26 @@ struct EditorialView: View {
                     Button("Rejected") { save(generate: false, platform: platform, decision: "rejected") }
                     Button("Draft") { save(generate: false, platform: platform, decision: "draft") }
                 }
-            }.disabled(!loaded || status != savedStatus)
+                Spacer()
+                Button(copiedField == key ? "Copied" : "Copy \(display)") {
+                    let combined = second.map { (drafts[key] ?? "") + "\n\n" + (drafts[$0] ?? "") } ?? (drafts[key] ?? "")
+                    copyDraft(combined, field: key)
+                }
+                .disabled((drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.disabled(!loaded || status != savedStatus || busy)
             if status != savedStatus { Text("Save or revert the whole-package state change first.").font(.caption) }
             Text(label).font(.caption)
             TextEditor(text: Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })).font(.body).accessibilityLabel(label)
             if key == "x_post" {
-                let measurement = try? XText.request(["op": "measure", "text": drafts[key] ?? ""])
-                Text(measurement.map { "\($0["weightedLength"] as? Int ?? 0) / 280 weighted characters" } ?? "X validation unavailable").font(.caption)
+                let overLimit = !xValid || (xWeightedLength ?? 0) > 280
+                Text(xWeightedLength.map { "\($0) / 280 weighted characters" } ?? "X validation unavailable")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(overLimit ? Theme.danger : .secondary)
             }
             if let second { Text("Description").font(.caption); TextEditor(text: Binding(get: { drafts[second] ?? "" }, set: { drafts[second] = $0 })).accessibilityLabel("YouTube description") }
         }.padding().disabled(retired)
     }
-    private func apply(_ row: [String: Any]) {
+    private func apply(_ row: [String: Any], brief: [String: Any]?, repairReason: String?) {
         let state = row["editorial"] as? [String: Any] ?? [:]
         title = row["title"] as? String ?? ""; revision = row["revision"] as? Int ?? 0; version = state["version"] as? Int ?? 0
         status = state["status"] as? String ?? "unreviewed"; bookmarked = state["bookmarked"] as? Bool ?? false
@@ -291,20 +357,43 @@ struct EditorialView: View {
         if let id = row["split_from"] as? String { details.append("Split from \(id). Earlier shared evidence remains in that story's history.") }
         if let id = row["last_repair_id"] as? String {
             details.append("Repair receipt: " + id)
-            if let record = try? store.repairReceipt(id), let reason = record["reason"] as? String { details.append("Reason: " + reason) }
+            if let repairReason { details.append("Reason: " + repairReason) }
         }
         groupingDetails = details.joined(separator: "\n")
         sourceURLs = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String })).sorted()
         sources = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["source"] as? String })).sorted()
-        if let brief = try? store.researchBrief(storyID), brief["story_revision"] as? Int == revision, brief["editorial_version"] as? Int == version {
+        if let brief, brief["story_revision"] as? Int == revision, brief["editorial_version"] as? Int == version {
             savedBrief = brief
         } else { savedBrief = nil }
         loaded = true
         savedFingerprint = fingerprint
     }
+    private func hydrate(_ rowData: Data) async throws -> ([String: Any], [String: Any]?, String?) {
+        let db = store, sid = storyID
+        let bundle = try await Task.detached { () throws -> (Data, Data?, String?) in
+            let row = try JSONSerialization.jsonObject(with: rowData) as! [String: Any]
+            let reason = (row["last_repair_id"] as? String).flatMap { (try? db.repairReceipt($0))?["reason"] as? String }
+            let briefData = (try? db.researchBrief(sid)).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+            return (rowData, briefData, reason)
+        }.value
+        let row = try JSONSerialization.jsonObject(with: bundle.0) as! [String: Any]
+        let brief = bundle.1.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return (row, brief, bundle.2)
+    }
     private func load() {
-        do { guard let row = try store.editorial(storyID) else { throw LibraryFailure.missing }; apply(row); message = "" }
-        catch { message = "Could not load the retained story." }
+        let db = store, sid = storyID
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let rowData = try await Task.detached { () throws -> Data in
+                    guard let row = try db.editorial(sid) else { throw LibraryFailure.missing }
+                    return try JSONSerialization.data(withJSONObject: row)
+                }.value
+                let (row, brief, reason) = try await hydrate(rowData)
+                apply(row, brief: brief, repairReason: reason); message = ""
+            } catch { message = "Could not load the retained story." }
+        }
     }
     private func save(generate: Bool, platform: String? = nil, decision: String? = nil) {
         var change: [String: Any] = ["expected_revision": revision, "expected_editorial_version": version, "bookmarked": bookmarked, "notes": notes]
@@ -315,20 +404,48 @@ struct EditorialView: View {
             let patch = Dictionary(uniqueKeysWithValues: LibraryModel.fields.keys.filter { (drafts[$0] ?? "") != (savedDrafts[$0] ?? "") }.map { ($0, drafts[$0] ?? "") })
             if !patch.isEmpty { change["draft_patch"] = patch }
         }
-        do { apply(try store.saveEditorial(storyID, change: change)); message = "Saved. No posts were published."; changed() }
-        catch LibraryFailure.conflict(let detail) { message = detail + ". Your unsaved text is still here; copy it before reloading." }
-        catch LibraryFailure.invalid(let detail) { message = detail }
-        catch { message = "Save failed. Your edits are still here." }
+        guard let changeData = try? JSONSerialization.data(withJSONObject: change) else { return }
+        let db = store, sid = storyID
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let rowData = try await Task.detached { () throws -> Data in
+                    let parsed = try JSONSerialization.jsonObject(with: changeData) as! [String: Any]
+                    let saved = try db.saveEditorial(sid, change: parsed)
+                    return try JSONSerialization.data(withJSONObject: saved)
+                }.value
+                let (row, brief, reason) = try await hydrate(rowData)
+                apply(row, brief: brief, repairReason: reason); message = "Saved. No posts were published."; changed()
+            }
+            catch LibraryFailure.conflict(let detail) { message = detail + ". Your unsaved text is still here; copy it before reloading." }
+            catch LibraryFailure.invalid(let detail) { message = detail }
+            catch { message = "Save failed. Your edits are still here." }
+        }
     }
     private func mute(_ source: String) {
-        do { _ = try store.librarySettings(kind: "mute", name: source, value: true, write: true); message = "Muted in the library. Evidence and agent deliveries are preserved."; changed() }
-        catch { message = "Could not mute this source." }
+        let db = store
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                try await Task.detached { _ = try db.librarySettings(kind: "mute", name: source, value: true, write: true) }.value
+                message = "Muted in the library. Evidence and agent deliveries are preserved."; changed()
+            } catch { message = "Could not mute this source." }
+        }
     }
     private func exportPackage() {
-        do {
-            let payload = try store.researchExport(storyID)
-            let folder = try ResearchPackage.write(payload, in: AppPaths.exports)
-            NSWorkspace.shared.activateFileViewerSelecting([folder]); message = "Exported the saved version to \(folder.lastPathComponent)."
-        } catch { message = "Could not export the research package." }
+        let db = store, sid = storyID
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let folder = try await Task.detached { () throws -> URL in
+                    let payload = try db.researchExport(sid)
+                    return try ResearchPackage.write(payload, in: AppPaths.exports)
+                }.value
+                NSWorkspace.shared.activateFileViewerSelecting([folder]); message = "Exported the saved version to \(folder.lastPathComponent)."
+            } catch { message = "Could not export the research package." }
+        }
     }
 }

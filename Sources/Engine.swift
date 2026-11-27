@@ -79,6 +79,8 @@ final class NewsEngine: ObservableObject {
     private var completedFetches = 0
     private var started = false
     private var autoRefreshTask: Task<Void, Never>?
+    private var lastAutoRefreshConfig: (enabled: Bool, minutes: Int)?
+    @Published var skillInstallMessage = ""
 
     var filtered: [Article] {
         var items = articles
@@ -166,10 +168,17 @@ final class NewsEngine: ObservableObject {
     }
 
     func configureAutomaticRefresh() {
+        let enabled = settings.setupCompleted && settings.autoRefresh
+        let minutes = min(120, max(5, settings.refreshMinutes))
+        if let last = lastAutoRefreshConfig, last.enabled == enabled, last.minutes == minutes,
+           (!enabled || autoRefreshTask != nil) {
+            return
+        }
+        lastAutoRefreshConfig = (enabled, minutes)
         autoRefreshTask?.cancel()
         autoRefreshTask = nil
-        guard settings.setupCompleted && settings.autoRefresh else { return }
-        let delay = UInt64(min(120, max(5, settings.refreshMinutes))) * 60 * 1_000_000_000
+        guard enabled else { return }
+        let delay = UInt64(minutes) * 60 * 1_000_000_000
         autoRefreshTask = Task { [weak self] in
             // Opening/reopening windows must not create overlapping refresh loops.
             // First check starts after a short grace period; subsequent checks use the selected interval.
@@ -267,28 +276,40 @@ final class NewsEngine: ObservableObject {
             } else { results.append(result) }
         }
         results.sort { $0.desk.title < $1.desk.title }
+        let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
         let candidates = results.flatMap(\.articles)
-        var merged: [Article]
-        do { merged = try stories.ingest(candidates) }
-        catch { status = "Story storage failed. Open Operations to inspect storage limits before retrying. No deliveries acknowledged."; return }
-        for result in results {
-            for update in result.cacheUpdates {
-                store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt)
-            }
-            for (symbol, payload) in result.quoteUpdates { store.saveQuote(symbol, payload: payload) }
+        let journal = stories
+        let freshness = store
+        let previousWire = articles.map(\.wire)
+        let previousFetchedAt = snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse)
+        let resultsCopy = results
+        let persisted: (merged: [Article], changedCount: Int)
+        do {
+            persisted = try await Task.detached { () throws -> ([Article], Int) in
+                let ingested = try journal.ingest(candidates)
+                for result in resultsCopy {
+                    for update in result.cacheUpdates {
+                        freshness.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt)
+                    }
+                    for (symbol, payload) in result.quoteUpdates { freshness.saveQuote(symbol, payload: payload) }
+                }
+                for article in candidates {
+                    freshness.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
+                }
+                let current = try journal.reconcileGroups(previousWire).map { try Article.fromWire($0) }
+                let combined = SnapshotPolicy.merge(previous: current, fresh: ingested,
+                    previousFetchedAt: previousFetchedAt, lookback: lookback,
+                    enabled: enabled, limit: maxItems)
+                freshness.pruneSeen(olderThanDays: 30)
+                return (combined, ingested.count)
+            }.value
+        } catch {
+            status = "Story storage failed. Open Operations to inspect storage limits before retrying. No deliveries acknowledged."
+            return
         }
-        for article in candidates {
-            store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
-        }
-        let changedCount = merged.count
-        let current: [Article]
-        do { current = try stories.reconcileGroups(articles.map(\.wire)).map { try Article.fromWire($0) } }
-        catch { status = "Could not reconcile repaired groups; the story journal is preserved."; return }
-        merged = SnapshotPolicy.merge(previous: current, fresh: merged,
-            previousFetchedAt: snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse), lookback: lookback,
-            enabled: enabled, limit: maxItems)
+        let merged = persisted.merged
+        let changedCount = persisted.changedCount
         for i in results.indices { results[i].articles = merged.filter { $0.displayDesks.contains(results[i].desk) } }
-        store.pruneSeen(olderThanDays: 30)
 
         let finished = Date()
         let fetchedAtISO = ISO8601DateFormatter().string(from: finished)
@@ -298,7 +319,6 @@ final class NewsEngine: ObservableObject {
         selected = merged.first { $0.id == selected?.id } ?? merged.first
         snapshot.update(articles: merged, desks: results, fetchedAt: fetchedAtISO)
 
-        let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
         report = FetchReport(started: started, finished: finished, freshCount: changedCount, scanned: scanned, desks: results)
         let saved = persistSnapshot(fetchedAt: fetchedAtISO)
         if saved { completedFetches += 1 }
@@ -450,6 +470,8 @@ final class NewsEngine: ObservableObject {
     private func exportJSON(fetchedAt: String) throws {
         let payload: [String: Any] = [
             "fetched_at": fetchedAt,
+            "finished_at": fetchedAt,
+            "scanned": report?.scanned ?? articles.count,
             "total_articles": articles.count,
             "coverage": Coverage.summary(desks.flatMap(\.coverageChecks)),
             "desks": desks.map(\.wire),
@@ -500,54 +522,71 @@ final class NewsEngine: ObservableObject {
         }
     }
 
-    func installAgentSkills() {
+    func toggleBookmark(_ article: Article) {
+        let journal = stories
+        let id = article.id
+        Task {
+            do {
+                let isNowBookmarked = try await Task.detached { () throws -> Bool in
+                    guard let current = try journal.editorial(id) else { throw LibraryFailure.missing }
+                    let state = current["editorial"] as? [String: Any] ?? [:]
+                    let revision = current["revision"] as? Int ?? 0
+                    let version = state["version"] as? Int ?? 0
+                    let next = !(state["bookmarked"] as? Bool ?? false)
+                    _ = try journal.saveEditorial(id, change: [
+                        "expected_revision": revision,
+                        "expected_editorial_version": version,
+                        "bookmarked": next
+                    ])
+                    return next
+                }.value
+                status = isNowBookmarked ? "Bookmarked \"\(article.title)\" in Research Library." : "Removed bookmark for \"\(article.title)\"."
+            } catch {
+                status = "Could not update bookmark for this story."
+            }
+        }
+    }
+
+    private func renderedAgentSkill() -> String {
         let tokenPath = AppPaths.tokenFile.path
-        let skill = """
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("SKILL.md"),
+           let template = try? String(contentsOf: url, encoding: .utf8) {
+            return template
+                .replacingOccurrences(of: "http://127.0.0.1:18765", with: bridge.endpoint)
+                .replacingOccurrences(of: "~/Library/Application Support/AgentNewsBot/bridge.token", with: tokenPath)
+                .replacingOccurrences(of: "~/Library/Application\\ Support/AgentNewsBot/bridge.token", with: tokenPath.replacingOccurrences(of: " ", with: "\\ "))
+        }
+        return """
         ---
         name: agent-news-bot
-        description: Pull new and updated news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-        version: 1.2.0
+        description: Pull new and updated news from the local Agent News Bot Mac app (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
+        version: \(APIContract.appVersion)
         ---
 
         # Agent News Bot
 
-        Agent News Bot is a macOS newsroom on this machine. It keeps a durable story journal. Snapshot reads can repeat. Use consumer events and acknowledge only after processing.
-
-        Base URL: \(bridge.endpoint)
+        Agent News Bot is a native macOS newsroom. Base URL: \(bridge.endpoint)
         Token file (0600): `\(tokenPath)`
-        Auth: `Authorization: Bearer $(cat "\(tokenPath)")`
+        Auth: `Authorization: Bearer $(cat "\(tokenPath)")` (or `X-Agent-Token`).
 
-        ## When to use
-        Use this when you need current headlines, AI/tech stories, Hacker News, Polymarket, stock moves, or weather for social or newsroom work.
-
-        ## Calls
-        - `GET /health`
-        - `GET /v1/capabilities` — authenticate, check API/contract/feature versions before automation
-        - `GET /v1/fresh?desk=<desk>&limit=<n>` — repeatable current snapshot
-        - `GET /v1/events?consumer=<name>` — persistent ordered revisions
-        - `POST /v1/events/ack?consumer=<name>&through=<next_cursor>&generation=<generation>` — acknowledge processed events only
-        - `GET /v1/articles/<id>` — single article in the fresh batch
-        - `GET /v1/stories/<id>` — current durable story and provider context
-        - `GET /v1/stories/<id>/revisions` — recorded revisions and differences
-        - `GET /v1/desks` — per-desk counts and source errors
-        - `GET /v1/status` — snapshot status
-        - `POST /v1/fetch` — request refresh (202 accepted, 409 already running); poll /v1/status fetch_job for completion
-
-        When `saved_search_alerts: 1` is advertised, `/v1/library/alerts` offers future-only subscriptions and a coalesced local inbox. Read requests do not mark seen; explicit `mark_seen` uses the exact matched sequence and never approves a draft or advances an agent cursor. Use `/v1/library?status=needs_review&include_muted=true&sort=priority` for correction review. Inbox matches are not a lossless consumer stream.
-        Errors preserve `error` and add versioned `error_detail` codes/recovery guidance. Do not blindly retry writes after ambiguous failures. Reload consumer/editorial state on 409. Repair retries require the same operation ID and identical request. Use `GET /v1/consumers` for generation/lag/lease status; active leases require X-Consumer-Lease. Commit every delivered event before acknowledging. Capabilities describe support, not source/agent readiness; inspect coverage separately. Empty output does not prove coverage is current. No request automatically authorizes publication or clears media rights.
-        Application recovery is an explicit local operator workflow. The packaged application_recovery.py archives selected configuration and exports with research, restores only into a new folder and never activates it. Archives may contain secrets; never upload them as release assets. Stop writers and reconcile consumers before deliberate activation.
-
-        Do not invent URLs. Prefer the tweet and hashtags fields when drafting social posts. Never print the bearer token in public channels.
+        See `GET /v1/capabilities` for full routes, limits, features (`platform_approval`, `editorial_brief`, `retained_history`, `saved_search_alerts`, `operator_storage`), and error codes.
         """
+    }
+
+    func installAgentSkills(overwrite: Bool = false) {
+        let skill = renderedAgentSkill()
         var installed = 0, preserved = 0, failed = 0
         for rel in [".hermes/skills/agent-news-bot", ".agents/skills/agent-news-bot"] {
             let dest = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(rel, isDirectory: true)
             let file = dest.appendingPathComponent("SKILL.md")
             do {
-                if try SkillInstaller.install(skill, at: file) { installed += 1 }
+                if try SkillInstaller.install(skill, at: file, overwrite: overwrite) { installed += 1 }
                 else { preserved += 1 }
             } catch { failed += 1 }
         }
-        status = "Agent skills: \(installed) installed, \(preserved) existing files preserved, \(failed) failed."
+        let action = overwrite ? "updated" : "installed"
+        let summary = "Agent skills: \(installed) \(action), \(preserved) existing files preserved, \(failed) failed."
+        skillInstallMessage = summary
+        status = summary
     }
 }

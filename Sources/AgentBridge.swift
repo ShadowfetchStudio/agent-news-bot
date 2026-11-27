@@ -33,6 +33,7 @@ final class AgentBridge: @unchecked Sendable {
     var endpoint: String { "http://127.0.0.1:\(port)" }
 
     func replaceToken(_ token: String) {
+        guard !token.isEmpty else { return }
         lifecycle.withLock { authToken = token }
     }
 
@@ -129,15 +130,20 @@ final class AgentBridge: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 4096)
         let deadline = ProcessInfo.processInfo.systemUptime + 5
         while data.range(of: Data("\r\n\r\n".utf8)) == nil {
-            guard ProcessInfo.processInfo.systemUptime < deadline else { return }
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                writeResponse(client, status: 408, body: json(408, ["error": "request header timeout"]).1); return
+            }
             let n = read(client, &buffer, buffer.count)
+            if n < 0 && errno == EINTR { continue }
             if n <= 0 { return }
             data.append(buffer, count: n)
-            if data.count > 64_000 { return }
+            if data.count > 64_000 {
+                writeResponse(client, status: 431, body: json(431, ["error": "request headers too large"]).1); return
+            }
         }
         let headerEnd = data.range(of: Data("\r\n\r\n".utf8))!.upperBound
         let headerText = String(data: data[..<headerEnd], encoding: .utf8) ?? ""
-        let lines = headerText.split(whereSeparator: \.isNewline).map(String.init)
+        let lines = headerText.components(separatedBy: "\r\n").filter { !$0.isEmpty }
         let requestLine = lines.first ?? ""
         let parts = requestLine.split(separator: " ")
         let method = parts.first.map { String($0).uppercased() } ?? "GET"
@@ -147,10 +153,14 @@ final class AgentBridge: @unchecked Sendable {
         let queryItems = components?.queryItems ?? []
 
         var headers: [String: String] = [:]
+        let singleValuedHeaders: Set<String> = ["content-length", "authorization", "transfer-encoding"]
         for line in lines.dropFirst() {
             if let idx = line.firstIndex(of: ":") {
                 let key = String(line[..<idx]).trimmingCharacters(in: .whitespaces).lowercased()
                 let value = String(line[line.index(after: idx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if singleValuedHeaders.contains(key), headers[key] != nil {
+                    writeResponse(client, status: 400, body: json(400, ["error": "duplicate header: \(key)"]).1); return
+                }
                 headers[key] = value
             }
         }
@@ -158,13 +168,13 @@ final class AgentBridge: @unchecked Sendable {
         let authHeader = headers["authorization"] ?? ""
         let altHeader = headers["x-agent-token"] ?? ""
         let token = lifecycle.withLock { authToken }
-        let authorized = Self.constantTimeEqual(authHeader, "Bearer \(token)")
-            || Self.constantTimeEqual(altHeader, token)
+        let authorized = !token.isEmpty && (Self.constantTimeEqual(authHeader, "Bearer \(token)")
+            || Self.constantTimeEqual(altHeader, token))
 
         let response: (Int, Data)
         if path == "/health" {
             response = method == "GET"
-                ? json(200, ["ok": true, "app": "Agent News Bot", "bridge": endpoint])
+                ? json(200, ["ok": true, "app": "Agent News Bot", "pid": Int(ProcessInfo.processInfo.processIdentifier), "bridge": endpoint])
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
@@ -175,13 +185,17 @@ final class AgentBridge: @unchecked Sendable {
         } else if path == "/v1/library" || path.hasPrefix("/v1/library/") || path == "/v1/consumers" {
             var body: [String: Any] = [:]
             if method == "POST" {
-                guard headers["transfer-encoding"] == nil, let length = Int(headers["content-length"] ?? ""), (0...65536).contains(length) else {
+                guard headers["transfer-encoding"] == nil, let length = Int(headers["content-length"] ?? ""), length >= 0 else {
                     writeResponse(client, status: 400, body: Data("{\"error\":\"a JSON body with Content-Length up to 65536 is required\"}".utf8)); return
+                }
+                guard length <= 65536 else {
+                    writeResponse(client, status: 413, body: Data("{\"error\":\"request body exceeds 65536 bytes\"}".utf8)); return
                 }
                 var bytes = Data(data[headerEnd...])
                 while bytes.count < length {
-                    guard ProcessInfo.processInfo.systemUptime < deadline else { writeResponse(client, status: 400, body: Data("{\"error\":\"incomplete request body\"}".utf8)); return }
+                    guard ProcessInfo.processInfo.systemUptime < deadline else { writeResponse(client, status: 408, body: Data("{\"error\":\"incomplete request body\"}".utf8)); return }
                     let count = read(client, &buffer, min(buffer.count, length - bytes.count))
+                    if count < 0 && errno == EINTR { continue }
                     guard count > 0 else { writeResponse(client, status: 400, body: Data("{\"error\":\"incomplete request body\"}".utf8)); return }
                     bytes.append(buffer, count: count)
                 }
@@ -192,14 +206,14 @@ final class AgentBridge: @unchecked Sendable {
             }
             response = path == "/v1/consumers" ? consumerResponse(method: method, body: body) : libraryResponse(path, method: method, query: Dictionary(queryItems.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last }), body: body)
         } else if path.hasPrefix("/v1/stories/") {
-            let parts = path.split(separator: "/").map(String.init)
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
             if method != "GET" { response = json(405, ["error": "method not allowed"]) }
-            else if let stories, parts.count == 3 || (parts.count == 4 && parts[3] == "revisions") {
+            else if let stories, (parts.count == 4 && !parts[3].isEmpty) || (parts.count == 5 && !parts[3].isEmpty && parts[4] == "revisions") {
                 do {
-                    if let story = try stories.story(parts[2]) {
-                        if parts.count == 4 {
+                    if let story = try stories.story(parts[3]) {
+                        if parts.count == 5 {
                             guard let limit = Int(queryItems.first { $0.name == "limit" }?.value ?? "50") else { throw StoryStore.Failure.invalidLimit }
-                            response = json(200, ["story_id": parts[2], "revisions": try stories.revisions(parts[2], limit: limit)])
+                            response = json(200, ["story_id": parts[3], "revisions": try stories.revisions(parts[3], limit: limit)])
                         } else { response = json(200, ["story": story]) }
                     } else { response = json(404, ["error": "story not found"]) }
                 } catch StoryStore.Failure.invalidLimit { response = json(400, ["error": "limit must be 1-100"]) }
@@ -357,6 +371,8 @@ final class AgentBridge: @unchecked Sendable {
             case "/v1/library/repairs":
                 if method == "POST" {
                     guard query.isEmpty else { throw LibraryFailure.invalid("repair POST does not accept query parameters") }
+                    let fetching = statusProvider().fetching || jobLock.withLock { job["state"] as? String == "running" }
+                    guard !fetching else { throw LibraryFailure.conflict("fetch in progress; retry the repair after completion") }
                     let receipt = try stories.repairGroup(body)
                     return json(200, ["repair": receipt, "snapshot_error": groupRepairHandler?() ?? NSNull()])
                 }
@@ -364,7 +380,9 @@ final class AgentBridge: @unchecked Sendable {
                 guard let receipt = try stories.repairReceipt(query["operation_id"] ?? "") else { throw LibraryFailure.missing }
                 return json(200, ["repair": receipt])
             case "/v1/library": return json(200, try stories.library(query))
-            case "/v1/library/settings": return json(200, try stories.librarySettings(kind: body["kind"] as? String, name: body["name"] as? String, value: body["value"], write: method == "POST"))
+            case "/v1/library/settings":
+                guard query.isEmpty else { throw LibraryFailure.invalid("settings does not accept query parameters") }
+                return json(200, try stories.librarySettings(kind: body["kind"] as? String, name: body["name"] as? String, value: body["value"], write: method == "POST"))
             case "/v1/library/brief":
                 guard Set(query.keys) == ["id"], let id = query["id"], !id.isEmpty else { throw LibraryFailure.invalid("id is required") }
                 return json(200, try stories.researchBrief(id))
@@ -389,7 +407,7 @@ final class AgentBridge: @unchecked Sendable {
         }
     }
 
-    private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+    static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
         let ab = Array(a.utf8)
         let bb = Array(b.utf8)
         guard ab.count == bb.count, !ab.isEmpty else { return false }
@@ -430,6 +448,8 @@ final class AgentBridge: @unchecked Sendable {
         case 401: reason = "Unauthorized"
         case 404: reason = "Not Found"
         case 405: reason = "Method Not Allowed"
+        case 408: reason = "Request Timeout"
+        case 431: reason = "Request Header Fields Too Large"
         case 503: reason = "Service Unavailable"
         default: reason = "Error"
         }
