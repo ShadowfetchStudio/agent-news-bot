@@ -31,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
     sub.add_parser("test-worldmonitor", help="Test configured World Monitor access without saving stories (reads one digest)")
     sub.add_parser("source-health", help="Read persistent source health and next-retry times without fetching")
+    sub.add_parser("operations", help="Read source health, consumer lag and ingestion storage budgets")
+    storage = sub.add_parser("storage-policy", help="Read or explicitly change journal ingestion limits")
+    storage.add_argument("--changes")
     sub.add_parser("status", help="Show last snapshot counts")
     library = sub.add_parser("library", help="Search retained research stories")
     for name in ("q", "entity", "desk", "source", "provider", "status", "sort", "limit", "offset"):
@@ -66,6 +69,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from .config import SHARED
+    if args.cmd == "operations":
+        from .config import HOME
+        from .stories import StoryStore
+        from .source_health import SourceHealth
+        from .storage import operations
+        if not (HOME / "stories.sqlite").is_file():
+            print("no story journal yet; fetch first", file=sys.stderr); return 1
+        import sqlite3
+        try:
+            result=operations(StoryStore(HOME / "stories.sqlite"),SourceHealth(HOME / "source-health.sqlite"))
+            json.dump(result,sys.stdout,indent=2); sys.stdout.write("\n")
+            return 0 if result['complete'] else 1
+        except (OSError,sqlite3.Error,ValueError,RuntimeError):
+            print("Operations storage unavailable; inspect the selected application home.",file=sys.stderr); return 1
     if args.cmd == "source-health":
         from .config import HOME
         from .source_health import SourceHealth
@@ -89,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd in ("library", "alerts", "brief", "editorial", "preferences", "export-research", "consumers", "repairs"):
+    if args.cmd in ("library", "storage-policy", "alerts", "brief", "editorial", "preferences", "export-research", "consumers", "repairs"):
         from pathlib import Path
         import sqlite3
         from .config import HOME
@@ -105,7 +122,9 @@ def main(argv: list[str] | None = None) -> int:
                 if path.stat().st_size > 65536: raise ValueError("change file exceeds 64 KiB")
                 change = json.loads(path.read_text())
                 if not isinstance(change, dict): raise ValueError("change file must be a JSON object")
-            if args.cmd == "library":
+            if args.cmd == "storage-policy":
+                result = journal.storage_change(change) if change is not None else journal.storage_status()
+            elif args.cmd == "library":
                 query = {k: str(v) for k, v in vars(args).items() if k != "cmd" and v is not None and not isinstance(v, bool)}
                 for key in ("bookmarked", "include_muted", "include_merged"):
                     if getattr(args, key): query[key] = "true"

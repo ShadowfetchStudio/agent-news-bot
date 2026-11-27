@@ -110,6 +110,13 @@ def inspect(path: Path, name: str, deadline: float):
                     if db.execute(f'SELECT 1 FROM "{table}" WHERE {invalid} LIMIT 1').fetchone():
                         raise RecoveryError(f"Invalid JSON record: {table}")
         if name == "stories.sqlite":
+            for (raw,) in db.execute("SELECT payload FROM library_preferences WHERE kind='storage' AND name='ingestion-policy'"):
+                policy=json.loads(raw)
+                if (not isinstance(policy,dict) or set(policy)!={'version','max_journal_bytes','min_free_bytes'}
+                    or any(type(v) is not int for v in policy.values()) or not 0<=policy['version']<=2**63-1
+                    or not 1024**2<=policy['max_journal_bytes']<=8*1024**3
+                    or not 64*1024**2<=policy['min_free_bytes']<=8*1024**3):
+                    raise RecoveryError("Invalid ingestion storage policy")
             if "journal_retention" in tables:
                 rows = db.execute("SELECT id,payload FROM journal_retention").fetchall()
                 if len(rows) > 1 or any(row[0] != 1 for row in rows):

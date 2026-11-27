@@ -12,6 +12,7 @@ from pathlib import Path
 from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id, can_group_titles
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
+from .storage import StorageMixin, guard as storage_guard
 from .alerts import AlertMixin, SCHEMA as ALERT_SCHEMA, record_alerts
 from .group_repairs import GroupRepairMixin, REPAIR_SCHEMA
 from .retention import SCHEMA as RETENTION_SCHEMA, retained_guard
@@ -64,7 +65,7 @@ def reports_disagree(sources):
     return False
 
 
-class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin, AlertMixin):
+class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin, AlertMixin, StorageMixin):
     def __init__(self, path: Path):
         self.path = path
         private_database(path)
@@ -119,6 +120,7 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin, AlertMixin):
         stamp = now.isoformat()
         with self.lock, self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            storage_guard(db,self.path)
             baseline, current = {}, {}
             for key in sorted(unique):
                 article = unique[key]

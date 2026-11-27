@@ -214,6 +214,13 @@ final class NewsEngine: ObservableObject {
         isFetching = true
         snapshot.setFetching(true)
         defer { isFetching = false; snapshot.setFetching(false) }
+        do {
+            let journal = stories
+            try await Task.detached { try journal.storagePreflight() }.value
+        } catch {
+            status = "Research ingestion paused. Open Operations to inspect storage limits and available disk space."
+            return
+        }
         status = "Scanning desks for new stories and updates…"
         let started = Date()
         let lookback = settings.lookbackHours
@@ -263,7 +270,7 @@ final class NewsEngine: ObservableObject {
         let candidates = results.flatMap(\.articles)
         var merged: [Article]
         do { merged = try stories.ingest(candidates) }
-        catch { status = "Story storage failed. No deliveries acknowledged; retry the fetch."; return }
+        catch { status = "Story storage failed. Open Operations to inspect storage limits before retrying. No deliveries acknowledged."; return }
         for result in results {
             for update in result.cacheUpdates {
                 store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt)

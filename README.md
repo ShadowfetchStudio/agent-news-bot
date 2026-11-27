@@ -26,7 +26,7 @@ On first macOS launch, choose direct sources or add a self-hosted/authorized Wor
 select desks and choose automatic refresh. Existing preferences are preserved on upgrade. Settings
 includes an explicit connection test using the entered values; Linux provides
 `agent-newsbot test-worldmonitor`. Tests do not ingest stories. See [setup and diagnostics](docs/worldmonitor.md).
-Persistent source history and backoff are available in Coverage, `GET /v1/sources`, and
+Persistent source history and backoff are available in Operations, `GET /v1/sources`, and
 `agent-newsbot source-health`. See [source resilience and maintained feeds](docs/SOURCE_HEALTH.md).
 
 ## Table of contents
@@ -64,6 +64,7 @@ Persistent source history and backoff are available in Coverage, `GET /v1/source
 - **New stories and updates.** A SQLite story journal groups canonical URLs and similar headlines, preserves source links, and emits revisions for changed titles, summaries or added sources. The lookback window defaults to 12h. Snapshot reads are repeatable; use the event API for consumer-specific delivery.
 - **Validated social drafts.** Each article carries a `tweet` measured by the shared official twitter-text parser (weighted Unicode, emoji, NFC and URL counting), plus suggested hashtags. Approve YouTube, X, TikTok or narration independently; edits invalidate the affected platform and source revisions require review. See [platform-specific approval](docs/PLATFORM_APPROVAL.md) and [post validation and source coverage](docs/POST_LENGTH_AND_COVERAGE.md).
 - **Audited grouping repairs.** Split unrelated reports or merge duplicates with preserved histories, drafts, source observations and consumer events. Revision checks reject stale edits; idempotent receipts make interrupted retries safe. [Repair workflow and API](docs/GROUP_REPAIRS.md).
+- **Operator controls.** Inspect consumer lag, source failures and journal storage in one view. Configurable ingestion limits pause growth without deleting research or acknowledging deliveries. [Storage and recovery workflow](docs/OPERATIONS.md).
 - **Saved-search alerts and review queue.** Watch future matching revisions in a durable local inbox, pause/resume without duplicates, and review changed approved drafts independently. Unread matches retain their revision evidence; no email, OS notification or automatic posting. [Alerts and API guide](docs/SAVED_SEARCH_ALERTS.md).
 - **Persistent research library.** Search retained stories beyond the fresh batch, save watchlists, bookmark stories and mute sources without losing agent events. Review source links and revision history, edit YouTube/X/TikTok templates, and approve a specific revision. Corrections require review again. [Library, API and CLI guide](docs/RESEARCH_LIBRARY.md).
 - **Portable research packages.** Export saved drafts, provenance and source URLs into a separate private folder for each export. Paste URLs into VideoBot's Inspect URLs workflow; review media availability and rights before queueing. No automatic publishing or downloads.
@@ -217,6 +218,8 @@ a claim of power-loss durability. Archive cleanup remains best-effort after a su
 | `GET /v1/events?consumer=<name>&limit=<n>` | yes | Durable ordered revisions after that consumer's acknowledged cursor (limit 1–500). |
 | `POST /v1/events/ack?consumer=<name>&through=<seq>&generation=<n>` | yes | Acknowledge a committed delivered prefix in the current generation; active leases also require their token header. |
 | `GET/POST /v1/consumers` | yes | Consumer status, explicit onboarding/reset and optional worker leases. |
+| `GET /v1/operations` | yes | Source health, consumer backlog and journal storage observations; section errors remain visible. |
+| `GET/POST /v1/library/storage` | yes | Read ingestion budgets or explicitly save version-checked limits. |
 | `GET /v1/sources` | yes | Persistent source health, last success and retry state. |
 | `GET /v1/library` | yes | Retained research filters and review priority. |
 | `GET/POST /v1/library/settings` | yes | Saved searches and source mutes. |
@@ -357,7 +360,7 @@ Hermes API discovery validates `/v1/models` and the configured model, rather tha
 
 Both integrations are optional. Agents can pull the authenticated local bridge independently. Use **Install agent skills** in Settings to create descriptors in `~/.hermes/skills/` and `~/.agents/skills/`; startup does not install them, and existing custom files are preserved. Descriptors reference the private token-file path rather than embedding its contents.
 
-All direct RSS/Hacker News/market/weather/prediction transfers share a **4 MiB decoded-body limit** while receiving and a total deadline (normally 14 seconds; existing source-specific 8/12-second deadlines remain). Linux runs each direct request in an owned worker and kills/reaps it at the parent deadline, including slow DNS/headers/redirects. macOS uses an ephemeral URLSession resource deadline and bounded streaming reads. Direct redirects are limited to five and HTTPS downgrades are rejected. Conditional 304 caching remains supported. World Monitor retains its separate 4 MiB/20-second boundary. Persistent source backoff/circuit breakers remain tracked release work.
+All direct RSS/Hacker News/market/weather/prediction transfers share a **4 MiB decoded-body limit** while receiving and a total deadline (normally 14 seconds; existing source-specific 8/12-second deadlines remain). Linux runs each direct request in an owned worker and kills/reaps it at the parent deadline, including slow DNS/headers/redirects. macOS uses an ephemeral URLSession resource deadline and bounded streaming reads. Direct redirects are limited to five and HTTPS downgrades are rejected. Conditional 304 caching remains supported. World Monitor retains its separate 4 MiB/20-second boundary. Persistent source backoff and probe leases prevent repeated failures from hammering an unavailable provider; inspect Operations or `/v1/sources`.
 
 ## Screenshots
 

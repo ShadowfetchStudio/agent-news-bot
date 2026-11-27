@@ -116,7 +116,7 @@ struct ContentView: View {
                         .foregroundStyle(Theme.gold)
                     Text("No stories in this desk’s lookback window")
                         .font(.title3.weight(.semibold))
-                    Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Coverage to inspect source failures.")
+                    Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Operations to inspect source failures and storage.")
                         .foregroundStyle(Theme.textMed)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
@@ -269,7 +269,7 @@ struct ContentView: View {
             }.accessibilityLabel(Text(alertCount.map { "Alerts, \($0) unread" } ?? "Alerts unavailable"))
                 .help("Saved-search alerts")
             Button { showLibrary = true } label: { Label("Library / drafts", systemImage: "books.vertical") }
-            Button { showCoverage = true } label: { Label("Coverage", systemImage: "list.bullet.clipboard") }
+            Button { showCoverage = true } label: { Label("Operations", systemImage: "list.bullet.clipboard") }
             Button {
                 Task { await engine.fetchFresh() }
             } label: {

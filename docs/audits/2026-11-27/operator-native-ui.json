@@ -1,0 +1,12 @@
+{
+  "fixture": "/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-operator-ui-w87678e2",
+  "policy_version": 3,
+  "database_bytes": 2576384,
+  "consumer_cursor": 0,
+  "consumer_lag": 2,
+  "story_events": 2,
+  "native_fetch_paused": true,
+  "api_fetch_job": "failed",
+  "provider_checks_started": 0,
+  "ui": "620px sheet visually inspected. Saved 8 MiB clears warning; 1 MiB restores warning. Invalid 0 rejected. Reload prompts before discarding; Cancel preserves input. Save and validation feedback verified in accessibility after replacing stale merged text with an independently labelled element. Full VoiceOver audit remains separate."
+}

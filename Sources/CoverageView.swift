@@ -9,7 +9,7 @@ struct CoverageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Source coverage").font(.title2.bold())
+                Text("Operations and coverage").font(.title2.bold())
                 Spacer()
                 Button("Reload history", action: reloadHistory)
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -24,6 +24,7 @@ struct CoverageView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    OperatorControlsView().environmentObject(engine)
                     if !historyError.isEmpty { Text(historyError).foregroundStyle(.red) }
                     if !history.isEmpty {
                         DisclosureGroup("Persistent source history (\(history.count))") {

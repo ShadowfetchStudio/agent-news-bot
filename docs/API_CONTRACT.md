@@ -71,3 +71,12 @@ Source resilience adds `source_health: 1` and authenticated `GET /v1/sources` (n
 `retained_history: 1` adds explicit `start: "retained"` consumer onboarding, retention status and history-gap markers. After pruning, implicit/full-history/date replay gets 409. Read [history retention](HISTORY_RETENTION.md) before interpreting a partial journal as complete evidence.
 
 `saved_search_alerts: 1` exposes the authenticated local inbox/subscription route `/v1/library/alerts`. The [alert contract](SAVED_SEARCH_ALERTS.md) explains future-only subscriptions, coalesced revisions, version/sequence checks and separate editorial review.
+
+
+## Operator observations and storage policy
+
+`operator_storage: 1` advertises authenticated `GET /v1/operations` and
+`GET/POST /v1/library/storage`. The first returns separately observed storage,
+delivery and source sections plus explicit per-section errors. Storage writes
+require both limits and `expected_version`; conflicts require a reload. See
+[Operations](OPERATIONS.md) for byte ranges, default budgets, recovery and scope.

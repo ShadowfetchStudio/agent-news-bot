@@ -3,7 +3,7 @@ import SQLite3
 
 /// Durable revisions. Delivery is at-least-once, with a separate acknowledgement per consumer.
 final class StoryStore: @unchecked Sendable {
-    private let path: URL
+    let path: URL
     private let lock = NSLock()
     init(path: URL) { self.path = path }
     enum Failure: Error { case database, invalidConsumer, invalidLimit, invalidAcknowledgement }
@@ -132,6 +132,7 @@ final class StoryStore: @unchecked Sendable {
             unique[key] = article
         }
         return try withDB { db in
+            try storageGuard(db)
             var baseline: [String: [String: Any]] = [:]
             var current: [String: [String: Any]] = [:]
             var touched = Set<String>()

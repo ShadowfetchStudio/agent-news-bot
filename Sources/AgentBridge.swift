@@ -258,6 +258,9 @@ final class AgentBridge: @unchecked Sendable {
                     response = json(404, ["error": "article not found"])
                 }
             }
+        } else if path == "/v1/operations" {
+            if !queryItems.isEmpty { response = json(400,["error":"operations does not accept query parameters"]) }
+            else { response = json(200,OperatorReport.read(stories: stories,health: sourceHealth)) }
         } else if path == "/v1/sources" {
             if !queryItems.isEmpty { response = json(400,["error":"sources does not accept query parameters"]) }
             else {
@@ -337,11 +340,14 @@ final class AgentBridge: @unchecked Sendable {
 
     private func libraryResponse(_ path: String, method: String, query: [String: String], body: [String: Any]) -> (Int, Data) {
         guard let stories else { return json(503, ["error": "story storage unavailable"]) }
-        let allowed = ["/v1/library", "/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs"]
+        let allowed = ["/v1/library", "/v1/library/storage", "/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs"]
         guard allowed.contains(path) else { return json(404, ["error": "not found"]) }
-        guard method == "GET" || (method == "POST" && ["/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
+        guard method == "GET" || (method == "POST" && ["/v1/library/storage", "/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
         do {
             switch path {
+            case "/v1/library/storage":
+                guard query.isEmpty else { throw LibraryFailure.invalid("storage does not accept query parameters") }
+                return json(200, try method == "GET" ? stories.storageStatus() : stories.storageChange(body))
             case "/v1/library/alerts":
                 if method == "POST" {
                     guard query.isEmpty else { throw LibraryFailure.invalid("alerts POST does not accept query parameters") }

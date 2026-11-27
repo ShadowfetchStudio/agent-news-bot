@@ -54,8 +54,8 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases (API and Linux CLI).
 - [x] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [x] Feed coverage/last-success/backoff, verified replacement sources.
-- [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
-  - Research-only backup/verification/new-folder restore and explicit consumer-safe archival pruning are implemented and tested below. Application configuration/selected-export recovery is now implemented below. Overall storage limits and the unified operator view remain open; bounded synthetic load evidence is recorded below.
+- [x] Backup, restore, consumer-safe pruning and bounded storage/load validation.
+  - Research/application recovery, backup-gated pruning, configurable ingestion budgets and operator observations are implemented and tested. This is an ingestion ceiling, not an overall filesystem quota; protected research, manual writes, caches, WAL and external archives have the documented scope in `OPERATIONS.md`. Bounded synthetic load evidence is recorded below.
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
 - [ ] Private file permissions, dependency constraints and vulnerability scan.
 - [x] Total provider deadline and circuit breaker.
@@ -339,3 +339,11 @@ Reviewed upstream World Monitor licensing/EULA documentation on 2026-11-27 and a
 - Updated public source table, architecture, carry-over/count wording, API route summary, CLI capabilities and stale dependency/refresh documentation to match implemented behavior.
 
 Overall storage controls/operator view, final broad UI/integration acceptance, packaging/publication and the requirement-by-requirement release audit remain open. No final release is claimed by this batch.
+
+
+## Operator controls and ingestion budgets
+
+- Native Operations view and authenticated `GET /v1/operations` combine storage, delivery lag/leases and source observations; failed sections stay visible. Linux adds `operations` and `storage-policy`; both runtimes expose version-checked GET/POST `/v1/library/storage`. Default 2 GiB ingestion ceiling/256 MiB free-space reserve, with explicit range limits and stale-edit conflicts. No automatic pruning, acknowledgements or resets. Policy persists in existing preferences and participates in validated recovery.
+- Fetch preflight precedes provider calls; ingestion rechecks and applies a SQLite page ceiling. Oversized batches roll back story/event/alert changes together. Reads, editorial work, acknowledgements and explicit recovery remain available. `OPERATIONS.md` documents manual-write, WAL, concurrent-free-space and archive exclusions; no hard filesystem quota is claimed.
+- Full local regressions: **439 Mac passed; native Pop!_OS 270 passed / 169 Mac-only skips**. New tests cover atomic exhaustion/retry, lowered limits, old research preservation, policy validation/conflicts, low disk before provider collection, partial operator-section failure, authenticated HTTP parity, CLI and valid/invalid backup policies.
+- Native Apple Silicon build passed strict ad-hoc signature verification. Actual isolated UI verified over-budget pause, larger-budget recovery, unchanged consumer cursor, invalid input and unsaved-edit protection in a 620-pixel sheet. Fixed stale accessibility feedback and verified both validation and success labels. API-triggered blocked fetch reports failed and starts zero provider checks. Evidence: `audits/2026-11-27/operator-native-ui.json`. No production app/home or service was changed; fixture app stopped and isolated preferences removed. Full VoiceOver and final integration/release acceptance remain separate.

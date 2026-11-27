@@ -5,8 +5,9 @@ APP_VERSION = "1.2.0"
 FEATURES = {name: 1 for name in (
     "async_fetch", "durable_stories", "source_observations", "story_revisions",
     "consumer_delivery", "consumer_generations", "consumer_leases", "research_library",
-    "editorial_drafts", "research_export", "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history", "saved_search_alerts")}
+    "editorial_drafts", "research_export", "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history", "saved_search_alerts", "operator_storage")}
 ROUTES = {
+    "/v1/operations": ["GET"], "/v1/library/storage": ["GET", "POST"],
     "/health": ["GET"], "/v1/capabilities": ["GET"], "/v1/status": ["GET"],
     "/v1/fresh": ["GET"], "/v1/articles/{id}": ["GET"], "/v1/desks": ["GET"], "/v1/sources": ["GET"],
     "/v1/fetch": ["POST"], "/v1/stories/{id}": ["GET"], "/v1/stories/{id}/revisions": ["GET"],

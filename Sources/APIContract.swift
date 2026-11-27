@@ -5,13 +5,13 @@ enum APIContract {
     static let features = Dictionary(uniqueKeysWithValues: [
         "async_fetch", "durable_stories", "source_observations", "story_revisions", "consumer_delivery",
         "consumer_generations", "consumer_leases", "research_library", "editorial_drafts", "research_export",
-        "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history", "saved_search_alerts"].map { ($0, 1) })
+        "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history", "saved_search_alerts", "operator_storage"].map { ($0, 1) })
     static let routes: [String: [String]] = [
         "/health": ["GET"], "/v1/capabilities": ["GET"], "/v1/status": ["GET"], "/v1/fresh": ["GET"],
-        "/v1/articles/{id}": ["GET"], "/v1/desks": ["GET"], "/v1/sources": ["GET"], "/v1/fetch": ["POST"],
+        "/v1/articles/{id}": ["GET"], "/v1/desks": ["GET"], "/v1/sources": ["GET"], "/v1/operations": ["GET"], "/v1/fetch": ["POST"],
         "/v1/stories/{id}": ["GET"], "/v1/stories/{id}/revisions": ["GET"], "/v1/events": ["GET"],
         "/v1/events/ack": ["POST"], "/v1/consumers": ["GET", "POST"], "/v1/library": ["GET"],
-        "/v1/library/settings": ["GET", "POST"], "/v1/library/alerts": ["GET", "POST"], "/v1/library/editorial": ["GET", "POST"],
+        "/v1/library/storage": ["GET", "POST"], "/v1/library/settings": ["GET", "POST"], "/v1/library/alerts": ["GET", "POST"], "/v1/library/editorial": ["GET", "POST"],
         "/v1/library/export": ["GET"], "/v1/library/brief": ["GET"], "/v1/library/repairs": ["GET", "POST"]]
     static let errors: [Int: (String, String)] = [
         400: ("invalid_request", "correct_request"), 401: ("unauthorized", "reload_credentials"),
