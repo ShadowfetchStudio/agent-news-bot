@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from .private_config import load_private_config
+
+load_private_config()
 
 HOME = Path(os.environ.get("AGENT_NEWSBOT_HOME", os.path.expanduser("~/.local/share/agent-news-bot")))
 SHARED = Path(os.environ.get("AGENT_NEWSBOT_SHARED", str(HOME / "shared")))

@@ -10,6 +10,7 @@ final class StoryStore: @unchecked Sendable {
 
     func withDB<T>(_ work: (OpaquePointer) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
+        do { try AppPaths.prepareDatabase(path) } catch { throw Failure.database }
         var handle: OpaquePointer?
         guard sqlite3_open(path.path, &handle) == SQLITE_OK, let db = handle else {
             if let handle { sqlite3_close(handle) }; throw Failure.database

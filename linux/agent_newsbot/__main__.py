@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import sys
+import os
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     export = sub.add_parser("export-research", help="Export saved drafts, provenance and VideoBot source URLs")
     export.add_argument("id"); export.add_argument("--destination", required=True)
     args = parser.parse_args(argv)
+    os.umask(0o077)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 

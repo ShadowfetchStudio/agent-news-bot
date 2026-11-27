@@ -1177,3 +1177,21 @@ def test_consumer_controls_fence_replay_and_worker_leases(runtime, request, tmp_
         assert change('reset',expected=6,start='now').json()['cursor']==3
         assert pending().json()['count']==0
         assert change('reset',expected=6,start='history').status_code==409
+
+
+def test_story_database_is_private(journal_runtime):
+    journal_runtime.ingest([article()])
+    assert journal_runtime.path.stat().st_mode & 0o777 == 0o600
+
+
+def test_token_creation_is_atomic_private_and_does_not_replace_invalid_file(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    state=object.__new__(server.NewsState); state.token_path=tmp_path/'export/bridge.token'
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        tokens=list(workers.map(lambda _:state._load_or_create_token(),range(32)))
+    assert len(set(tokens))==1 and len(tokens[0])==64
+    assert state.token_path.stat().st_mode&0o777==0o600
+    assert not list(state.token_path.parent.glob('.bridge-token-*'))
+    state.token_path.write_text('bad')
+    with pytest.raises(ValueError,match='invalid bridge token'): state._load_or_create_token()
+    assert state.token_path.read_text()=='bad'

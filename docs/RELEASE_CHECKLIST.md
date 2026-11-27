@@ -23,7 +23,7 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 
 - [ ] First-run mode selection, connection test and actionable provider errors.
 - [ ] Safe observable credential storage, failure preservation and rotation.
-- [ ] Supported private Linux config and service wiring.
+- [x] Supported private Linux config and service wiring.
 - [ ] macOS automatic refresh and restored batch.
 - [ ] Disagreement/correction timeline, multiple desks and durable story detail.
 - [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
@@ -37,7 +37,7 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 - [ ] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [ ] Feed coverage/last-success/backoff, verified replacement sources.
 - [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
-- [ ] Staged Linux upgrades, config preservation, health check and rollback.
+- [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
 - [ ] Private file permissions, dependency constraints and vulnerability scan.
 - [ ] Total provider deadline and circuit breaker.
 - [ ] Hosted data permissions documented separately from code licensing.
@@ -127,3 +127,19 @@ Latest native validation: 101 tests passed; the Apple Silicon app built without 
 - Real HTTP tests on Swift/Python cover create/reset, stale generation, missing generation, prior offered-range invalidation, competing leases, renew/release, expiry, date start and status privacy. Wider versioned capability/error discovery and full native automation UI remain open.
 
 Consumer batch validation: full Mac integration suite **112 passed**, plus **3 passed** for the newly added reference-consumer tests; native Pop!_OS full suite **69 passed / 46 native-Mac skips**. The Apple Silicon app built without warnings and passed strict ad-hoc signature verification. A separate CLI regression checks administration from outside the checkout. These remain development builds; release packaging, authenticated provider/real agent acceptance and publication are still pending.
+
+## Staged installation and private configuration batch
+
+- Replaced in-place Linux installation with independent permanent release environments, dependency/import preflight, atomic current/previous links, exclusive installer locking, managed runtime drop-in, PID-matched localhost health acceptance and failure rollback. Explicit `--rollback` reactivates the prior staged version through the same checks. Existing configuration/main-unit/custom CLI data are preserved; recovery records are unique per transaction.
+- Added a private non-executable configuration loader, systemd EnvironmentFile wiring and installed CLI agreement. Source-tree setup instructions now install the entire package instead of omitting parser dependencies.
+- Existing invalid Linux bridge tokens fail visibly instead of silently rotating. New tokens are exclusively created at 0600. CLI uses umask 0077; Mac/Python databases are prepared at 0600 before SQLite opens them, reject symlinks and retain existing bytes. New application directories use 0700. The dependency vulnerability scan remains separately open.
+- The first native installer test caught EnvironmentFile quoting that systemd interpreted literally. The generated path was corrected and validated with a filename containing spaces; the failed attempt returned failure and removed only its own test service.
+- Native Pop!_OS systemd **user-service** smoke test passed initial install, staged upgrade, configuration and consumer preservation, explicit rollback in both directions, injected broken-release failure, automatic rollback and restored-service health. Its unique temporary service was removed. Recovery/report artifacts were retained in the isolated test directory. Root-system-service installation has not been run on the user's machine; system unit generation/identity is covered by code review and automated preservation/rollback tests, not claimed as native root acceptance.
+- Full Mac regression suite: **124 passed**; app build without warnings and strict ad-hoc signature verification passed. This remains a development build and is not a notarized/published release.
+- Install-time journal backups are now available. They do not close the separate full backup/restore, pruning and storage/load requirements. Old release/recovery directories are retained deliberately until explicit retention tooling is delivered.
+
+Native Linux regression result for this batch: **77 passed / 47 native-Mac skips**. A final focused installer/configuration run additionally verifies package-staging umask isolation. Successful native service validation covered isolated test data only; no production news service was replaced.
+
+Final token regression: concurrent creators publish one complete private token without overwriting another creator; invalid existing bytes remain unchanged and fail visibly. Targeted Mac/Linux tests passed.
+
+Final installer acceptance also checks the process command line uses the selected current interpreter and rejects Python path/home overrides that could load another runtime. The native smoke sequence passed with this check. A focused regression verifies that a late CLI-write failure restores the previously disabled service state as well as the old release. Native root-system execution and vulnerability/constraint work remain explicitly unclaimed.

@@ -8,6 +8,8 @@ import sqlite3
 import threading
 import time
 import uuid
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -29,8 +31,8 @@ class FetchBusy(RuntimeError):
 
 class NewsState:
     def __init__(self) -> None:
-        HOME.mkdir(parents=True, exist_ok=True)
-        SHARED.mkdir(parents=True, exist_ok=True)
+        HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
+        SHARED.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.store = FreshnessStore(HOME / "seen.sqlite")
         self.stories = StoryStore(HOME / "stories.sqlite")
         self.token_path = HOME / "export" / "bridge.token"
@@ -70,14 +72,26 @@ class NewsState:
 
     def _load_or_create_token(self) -> str:
         path = self.token_path
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_symlink(): raise ValueError("bridge token must be a regular file, not a symlink")
         if path.exists():
+            if not path.is_file() or path.stat().st_size>8192: raise ValueError("invalid bridge token file")
+            path.chmod(0o600)
             token = path.read_text().strip()
-            if len(token) >= 16:
+            if len(token) >= 16 and not any(c.isspace() for c in token):
                 return token
-        token = secrets.token_hex(16)
-        path.write_text(token + "\n")
-        path.chmod(0o640)
+            raise ValueError("invalid bridge token file; preserve it and repair explicitly")
+        token = secrets.token_hex(32)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w',dir=path.parent,prefix='.bridge-token-',delete=False) as handle:
+                temporary=handle.name; handle.write(token + "\n"); handle.flush(); os.fsync(handle.fileno())
+            # Publish complete bytes without replacing another creator's credential.
+            os.link(temporary,path)
+        except FileExistsError:
+            return self._load_or_create_token()
+        finally:
+            if temporary is not None: os.unlink(temporary)
         return token
 
     def _begin_refresh(self) -> dict:
@@ -257,7 +271,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/health":
-            self._send(200, {"ok": True, "app": "Agent News Bot", "bridge": f"http://127.0.0.1:{PORT}"})
+            self._send(200, {"ok": True, "app": "Agent News Bot", "pid": os.getpid(), "bridge": f"http://127.0.0.1:{PORT}"})
             return
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
@@ -401,7 +415,7 @@ def loop_fetch() -> None:
 
 def serve() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    threading.Thread(target=loop_fetch, daemon=True, name="fetch-loop").start()
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    threading.Thread(target=loop_fetch, daemon=True, name="fetch-loop").start()
     log.info("Agent News Bot listening on http://127.0.0.1:%s", PORT)
     httpd.serve_forever()

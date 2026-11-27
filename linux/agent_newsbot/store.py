@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote, unqu
 import idna
 
 from .config import HOME
+from .private_files import private_database
 
 
 def canonical_url(raw: str) -> str:
@@ -90,6 +91,7 @@ def iso(dt: datetime | None) -> str | None:
 class FreshnessStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or (HOME / "seen.sqlite")
+        private_database(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         with self._connect() as db:

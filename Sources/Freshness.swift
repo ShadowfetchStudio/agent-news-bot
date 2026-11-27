@@ -7,6 +7,7 @@ final class FreshnessStore: @unchecked Sendable {
     private var db: OpaquePointer?
 
     init(path: URL) {
+        do { try AppPaths.prepareDatabase(path) } catch { return }
         if sqlite3_open(path.path, &db) != SQLITE_OK {
             db = nil
             return

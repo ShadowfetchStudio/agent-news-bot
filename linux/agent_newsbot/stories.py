@@ -13,6 +13,7 @@ from .store import canonical_url, title_tokens, is_near_duplicate_title, article
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
 from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
+from .private_files import private_database
 import time
 
 
@@ -62,6 +63,7 @@ def reports_disagree(sources):
 class StoryStore(LibraryMixin, ConsumerMixin):
     def __init__(self, path: Path):
         self.path = path
+        private_database(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
         with self.connect() as db:

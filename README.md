@@ -245,16 +245,17 @@ old installation manually if desired. It never removes NewsBot or its saved data
 
 ## Build & run — Linux
 
-Requirements: Python 3.10+, `pip install feedparser requests`.
+Requirements: Python 3.10+ with venv/pip support. Install all package dependencies, including the shared X parser runtime.
 
 Run it directly from the package directory:
 
 ```bash
 cd linux
-pip install feedparser requests
-python3 -m agent_newsbot serve      # start the API + periodic fetch loop
-python3 -m agent_newsbot fetch      # run one fetch, print JSON
-python3 -m agent_newsbot status     # show last snapshot counts
+python3 -m venv .venv
+.venv/bin/pip install .
+.venv/bin/agent-newsbot serve      # start the API + periodic fetch loop
+.venv/bin/agent-newsbot fetch      # run one fetch, print JSON
+.venv/bin/agent-newsbot status     # show last snapshot counts
 ```
 
 For a long-running deployment, install it as a systemd service:
@@ -265,14 +266,11 @@ sudo ./install.sh          # creates the 'agentnewsbot' user, installs to /opt/a
                            # state under /var/lib/agent-news-bot, and starts agent-news-bot.service
 ```
 
-`install.sh` is fully env-var driven — override `PREFIX`, `STATE_DIR`, and `SVC_USER` to install
-elsewhere or under a different service account. It builds the unit from
-[`agent-news-bot.service.example`](linux/agent-news-bot.service.example) (a plain, path-agnostic
-example you can also install by hand). Nothing about any host is baked into these files.
+The installer stages an independent versioned environment, runs preflight checks, switches an atomic `current` link and verifies the actual service PID over localhost. Startup failure restores the preceding runtime. Configuration and existing unit customizations are preserved; the runtime uses a managed drop-in. `--user` installs an unprivileged user service; `--rollback` returns to the previous staged release. `--no-start` explicitly skips service startup and health acceptance. See [installation, private configuration and recovery](docs/LINUX_UPGRADES.md) for options and legacy migration behavior.
 
 ## Configuration
 
-The Linux service is configured entirely through environment variables (all optional):
+The Linux service reads a private environment file through systemd. Direct/CLI runs also support `AGENT_NEWSBOT_CONFIG` (or the user's `~/.config/agent-news-bot/config.env`); explicit environment values override file values. The file is data, never executed, and must be private (0600). All runtime settings below are optional:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|

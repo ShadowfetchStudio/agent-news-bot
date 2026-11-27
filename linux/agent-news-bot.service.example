@@ -9,7 +9,7 @@ User=agentnewsbot
 Group=agentnewsbot
 WorkingDirectory=/var/lib/agent-news-bot
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/opt/agent-news-bot
+Environment=PYTHONPATH=
 Environment=AGENT_NEWSBOT_HOME=/var/lib/agent-news-bot
 Environment=AGENT_NEWSBOT_SHARED=/var/lib/agent-news-bot/shared
 Environment=AGENT_NEWSBOT_PORT=18765
@@ -17,7 +17,9 @@ Environment=AGENT_NEWSBOT_LOOKBACK_HOURS=12
 Environment=AGENT_NEWSBOT_MAX_PER_DESK=20
 Environment="AGENT_NEWSBOT_WEATHER_CITY=New York"
 Environment=AGENT_NEWSBOT_FETCH_INTERVAL=900
-ExecStart=/usr/bin/python3 -m agent_newsbot serve
+Environment=AGENT_NEWSBOT_CONFIG=
+EnvironmentFile=/etc/agent-news-bot/config.env
+ExecStart=/opt/agent-news-bot/current/.venv/bin/python -m agent_newsbot serve
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
@@ -28,7 +30,7 @@ ProtectHome=read-only
 ReadWritePaths=/var/lib/agent-news-bot
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=true
-UMask=0027
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
