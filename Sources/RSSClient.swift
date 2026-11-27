@@ -7,6 +7,7 @@ enum RSSClient {
         var skippedOld = 0
         var skippedDup = 0
         var seenURLs = Set<String>()
+        var cacheUpdates: [FeedCacheUpdate] = []
 
         for feed in FeedRegistry.feeds(for: desk) {
             do {
@@ -19,7 +20,7 @@ enum RSSClient {
                     accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"
                 )
                 if res.notModified { continue }
-                store.saveFeedCache(feed.url, etag: res.etag, lastModified: res.lastModified)
+                cacheUpdates.append(FeedCacheUpdate(url: feed.url, etag: res.etag, lastModified: res.lastModified))
                 let items = RSSParser.parse(data: res.data)
                 for item in items {
                     let link = CanonicalURL.fingerprint(item.link)
@@ -35,10 +36,6 @@ enum RSSClient {
                         continue
                     }
                     let id = FreshnessStore.articleID(url: link, fallback: item.title)
-                    if store.hasSeen(id) {
-                        skippedDup += 1
-                        continue
-                    }
                     let title = HTMLText.strip(item.title)
                     guard !title.isEmpty else { continue }
                     let summary = HTMLText.strip(item.summary)
@@ -66,7 +63,7 @@ enum RSSClient {
 
         collected.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         if collected.count > maxItems { collected = Array(collected.prefix(maxItems)) }
-        return DeskResult(desk: desk, articles: collected, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors)
+        return DeskResult(desk: desk, articles: collected, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors, cacheUpdates: cacheUpdates)
     }
 }
 

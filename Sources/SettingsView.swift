@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @State private var hermesToken = ""
     @State private var openClawToken = ""
+    @State private var worldMonitorKey = ""
 
     var body: some View {
         Form {
@@ -15,9 +16,19 @@ struct SettingsView: View {
                 Stepper(value: $settings.maxPerDesk, in: 5...50, step: 5) {
                     Text("Max \(settings.maxPerDesk) stories per desk")
                 }
-                Text("A story appears only if it is unseen and published inside the lookback window. Markets appear only on a real move. Weather appears when the forecast changes.")
+                Text("New stories, added sources and changed reports appear inside the lookback window. Markets appear only on a real move. Weather appears when the forecast changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("World Monitor (optional)") {
+                Toggle("Enable World Monitor", isOn: $settings.worldMonitorEnabled)
+                TextField("Server URL", text: $settings.worldMonitorURL)
+                Picker("Edition", selection: $settings.worldMonitorVariant) {
+                    ForEach(WorldMonitorClient.variants, id: \.self) { Text($0).tag($0) }
+                }
+                SecureField("API key (if required)", text: $worldMonitorKey)
+                Text("Connect your own server or a licensed hosted API. Existing news sources work independently. HTTP is accepted only on loopback; use HTTPS for remote servers.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Weather & markets") {
                 TextField("Weather city", text: $settings.weatherCity)
@@ -65,10 +76,12 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            worldMonitorKey = settings.worldMonitorKey
             hermesToken = settings.hermesToken
             openClawToken = settings.openClawToken
         }
         .onDisappear {
+            settings.worldMonitorKey = worldMonitorKey
             settings.hermesToken = hermesToken
             settings.openClawToken = openClawToken
             settings.save()

@@ -5,6 +5,7 @@ enum MarketsClient {
         var errors: [String] = []
         var skippedDup = 0
         var articles: [Article] = []
+        var quoteUpdates: [(String, String)] = []
         let list = symbols
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
@@ -38,7 +39,7 @@ enum MarketsClient {
                     skippedDup += 1
                     continue
                 }
-                store.saveQuote(symbol, payload: payload)
+                quoteUpdates.append((symbol, payload))
                 let sign = change >= 0 ? "+" : ""
                 let title = "\(display(symbol)) \(String(format: "%.2f", price)) \(sign)\(String(format: "%.2f%%", change * 100))"
                 let page = "https://finance.yahoo.com/quote/\(encoded)"
@@ -71,7 +72,7 @@ enum MarketsClient {
             abs(Double($0.extra["change"] ?? "0") ?? 0) > abs(Double($1.extra["change"] ?? "0") ?? 0)
         }
         if articles.count > maxItems { articles = Array(articles.prefix(maxItems)) }
-        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors)
+        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors, quoteUpdates: Array(quoteUpdates.prefix(articles.count)))
     }
 
     private static func number(_ value: Any?) -> Double {

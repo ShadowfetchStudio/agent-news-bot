@@ -129,6 +129,30 @@ struct ContentView: View {
                                 .foregroundStyle(Theme.textMed)
                                 .textSelection(.enabled)
                         }
+                        if let revision = article.wire["revision"] as? Int {
+                            Text("Revision \(revision) · \(article.wire["change"] as? String ?? "new")")
+                                .font(.caption).foregroundStyle(Theme.textLow)
+                        }
+                        let sources = article.wire["sources"] as? [[String: Any]] ?? []
+                        if !sources.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Sources (\(sources.count))").font(.headline)
+                                Text("Grouped by headline similarity. Multiple links do not establish independent confirmation.")
+                                    .font(.caption).foregroundStyle(Theme.textLow)
+                                ForEach(sources.indices, id: \.self) { i in
+                                    let source = sources[i]
+                                    if let raw = source["url"] as? String, let url = URL(string: raw),
+                                       ["https", "http"].contains(url.scheme ?? "") {
+                                        Link(source["source"] as? String ?? raw, destination: url)
+                                        Text(source["title"] as? String ?? "").font(.caption)
+                                        if let metadata = source["metadata"] as? [String: Any],
+                                           let location = metadata["locationName"] as? String, !location.isEmpty {
+                                            Text("World Monitor location: \(location)").font(.caption).foregroundStyle(Theme.textLow)
+                                        }
+                                    }
+                                }
+                            }.padding(10).anbCard()
+                        }
                         FlowTags(tags: article.hashtags)
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {

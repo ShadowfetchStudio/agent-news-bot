@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import secrets
+import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from .config import FETCH_INTERVAL, HOME, LOOKBACK_HOURS, PORT, SHARED
 from .engine import fetch_all
 from .store import FreshnessStore
+from .stories import StoryStore
 
 log = logging.getLogger("agent_newsbot")
 
@@ -22,6 +24,7 @@ class NewsState:
         HOME.mkdir(parents=True, exist_ok=True)
         SHARED.mkdir(parents=True, exist_ok=True)
         self.store = FreshnessStore(HOME / "seen.sqlite")
+        self.stories = StoryStore(HOME / "stories.sqlite")
         self.token_path = HOME / "export" / "bridge.token"
         self.latest_path = SHARED / "latest.json"
         self.token = self._load_or_create_token()
@@ -142,6 +145,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(401, {"error": "bearer token required"})
             return
         qs = parse_qs(parsed.query)
+        if path == "/v1/events":
+            try:
+                consumer = (qs.get("consumer") or [""])[0]
+                limit = int((qs.get("limit") or ["100"])[0])
+                self._send(200, STATE.stories.pending(consumer, limit))
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except (sqlite3.Error, OSError):
+                self._send(503, {"error": "story storage unavailable"})
+            return
+        if path == "/v1/events/ack":
+            self._send(405, {"error": "method not allowed"})
+            return
         if path == "/v1/fresh":
             with STATE.lock:
                 articles = list(STATE.snapshot.get("articles") or [])
@@ -194,6 +210,20 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
+            return
+        if parsed.path == "/v1/events/ack":
+            qs = parse_qs(parsed.query)
+            try:
+                consumer = (qs.get("consumer") or [""])[0]
+                through = int((qs.get("through") or [""])[0])
+                self._send(200, STATE.stories.acknowledge(consumer, through))
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except (sqlite3.Error, OSError):
+                self._send(503, {"error": "story storage unavailable"})
+            return
+        if parsed.path == "/v1/events":
+            self._send(405, {"error": "method not allowed"})
             return
         if parsed.path == "/v1/fetch":
             snapshot = STATE.refresh()

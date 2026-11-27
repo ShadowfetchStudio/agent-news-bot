@@ -13,11 +13,17 @@ final class SettingsStore: ObservableObject {
     @Published var openClawURL: String
     @Published var bridgePort: Int
     @Published var enabledDesks: Set<Desk>
+    @Published var worldMonitorEnabled: Bool
+    @Published var worldMonitorURL: String
+    @Published var worldMonitorVariant: String
     @Published var marketSymbols: String
 
     private let defaults = UserDefaults.standard
 
     private init() {
+        worldMonitorEnabled = defaults.bool(forKey: "worldMonitorEnabled")
+        worldMonitorURL = defaults.string(forKey: "worldMonitorURL") ?? "http://127.0.0.1:3000"
+        worldMonitorVariant = defaults.string(forKey: "worldMonitorVariant") ?? "full"
         lookbackHours = defaults.object(forKey: "lookbackHours") as? Double ?? 12
         maxPerDesk = defaults.object(forKey: "maxPerDesk") as? Int ?? 20
         weatherCity = defaults.string(forKey: "weatherCity") ?? "New York"
@@ -35,6 +41,9 @@ final class SettingsStore: ObservableObject {
     }
 
     func save() {
+        defaults.set(worldMonitorEnabled, forKey: "worldMonitorEnabled")
+        defaults.set(worldMonitorURL, forKey: "worldMonitorURL")
+        defaults.set(worldMonitorVariant, forKey: "worldMonitorVariant")
         defaults.set(lookbackHours, forKey: "lookbackHours")
         defaults.set(maxPerDesk, forKey: "maxPerDesk")
         defaults.set(weatherCity, forKey: "weatherCity")
@@ -44,6 +53,11 @@ final class SettingsStore: ObservableObject {
         defaults.set(bridgePort, forKey: "bridgePort")
         defaults.set(marketSymbols, forKey: "marketSymbols")
         defaults.set(enabledDesks.map(\.rawValue), forKey: "enabledDesks")
+    }
+
+    var worldMonitorKey: String {
+        get { Keychain.get("worldmonitor") ?? "" }
+        set { Keychain.set(newValue, account: "worldmonitor") }
     }
 
     var hermesToken: String {

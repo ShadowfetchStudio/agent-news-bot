@@ -17,6 +17,7 @@ final class AgentBridge: @unchecked Sendable {
     var articlesProvider: () -> [Article] = { [] }
     var desksProvider: () -> [DeskResult] = { [] }
     var statusProvider: () -> BridgeStatusSnapshot = { BridgeStatusSnapshot(fresh: 0, fetchedAt: nil, fetching: false) }
+    var stories: StoryStore?
     var fetchHandler: (() async -> Int)?
 
     var endpoint: String { "http://127.0.0.1:\(port)" }
@@ -119,6 +120,22 @@ final class AgentBridge: @unchecked Sendable {
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
+        } else if path == "/v1/events" || path == "/v1/events/ack" {
+            if method != (path == "/v1/events" ? "GET" : "POST") {
+                response = json(405, ["error": "method not allowed"])
+            } else if let stories {
+                let consumer = queryItems.first { $0.name == "consumer" }?.value ?? ""
+                do {
+                    if path == "/v1/events" {
+                        guard let limit = Int(queryItems.first { $0.name == "limit" }?.value ?? "100") else { throw StoryStore.Failure.invalidLimit }
+                        response = json(200, try stories.pending(consumer: consumer, limit: limit))
+                    } else {
+                        guard let through = Int(queryItems.first { $0.name == "through" }?.value ?? "") else { throw StoryStore.Failure.invalidAcknowledgement }
+                        response = json(200, try stories.acknowledge(consumer: consumer, through: through))
+                    }
+                } catch StoryStore.Failure.database { response = json(503, ["error": "story storage unavailable"]) }
+                catch { response = json(400, ["error": "invalid consumer, limit, or acknowledgement"]) }
+            } else { response = json(503, ["error": "story storage unavailable"]) }
         } else if path == "/v1/fresh" {
             if method != "GET" {
                 response = json(405, ["error": "method not allowed"])
@@ -212,19 +229,7 @@ final class AgentBridge: @unchecked Sendable {
     }
 
     private func encode(_ article: Article) -> [String: Any] {
-        [
-            "id": article.id,
-            "desk": article.desk.rawValue,
-            "category": article.desk.title,
-            "title": article.title,
-            "url": article.url,
-            "source": article.source,
-            "published": article.published.map { ISO8601DateFormatter().string(from: $0) } ?? "",
-            "summary": article.summary,
-            "tweet": article.tweet,
-            "tweet_chars": article.tweetChars,
-            "hashtags": article.hashtags
-        ]
+        article.wire
     }
 
     private func json(_ status: Int, _ object: [String: Any]) -> (Int, Data) {

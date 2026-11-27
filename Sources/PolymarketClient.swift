@@ -3,7 +3,7 @@ import Foundation
 enum PolymarketClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
-        var skippedDup = 0
+        let skippedDup = 0
         var skippedOld = 0
         var articles: [Article] = []
 
@@ -24,10 +24,6 @@ enum PolymarketClient {
                         ? "https://polymarket.com"
                         : "https://polymarket.com/event/\(slug)"
                     let id = FreshnessStore.articleID(url: url, fallback: slug)
-                    if store.hasSeen(id) {
-                        skippedDup += 1
-                        continue
-                    }
                     let end = DateStamp.parse(string(row["endDate"] ?? row["end_date_iso"]))
                     if let end, end < Date().addingTimeInterval(-lookbackHours * 3600), end < Date() {
                         skippedOld += 1

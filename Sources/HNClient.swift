@@ -4,7 +4,7 @@ enum HNClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
         var skippedOld = 0
-        var skippedDup = 0
+        let skippedDup = 0
         var articles: [Article] = []
 
         do {
@@ -30,10 +30,6 @@ enum HNClient {
                 let url = item.url?.isEmpty == false ? item.url! : "https://news.ycombinator.com/item?id=\(id)"
                 if url.contains("news.google.com") { continue }
                 let fingerprint = FreshnessStore.articleID(url: CanonicalURL.fingerprint(url), fallback: "hn-\(id)")
-                if store.hasSeen(fingerprint) {
-                    skippedDup += 1
-                    continue
-                }
                 let extra = ["hn": "https://news.ycombinator.com/item?id=\(id)", "score": "\(item.score ?? 0)"]
                 let tags = Hashtagger.tags(desk: .hackerNews, title: item.title, extra: item.score ?? 0 >= 100 ? ["#Trending"] : [])
                 let (tweet, chars) = Hashtagger.tweet(title: item.title, url: url, tags: tags)

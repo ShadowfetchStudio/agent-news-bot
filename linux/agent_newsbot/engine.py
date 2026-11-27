@@ -12,7 +12,8 @@ from urllib.parse import quote
 import feedparser
 import requests
 
-from . import hashtags
+from . import hashtags, worldmonitor
+from .stories import StoryStore
 from .config import (
     ALL_DESKS,
     Article,
@@ -30,11 +31,9 @@ from .store import (
     FreshnessStore,
     article_id,
     canonical_url,
-    is_near_duplicate_title,
     iso,
     parse_date,
     strip_html,
-    title_tokens,
 )
 
 log = logging.getLogger("agent_newsbot")
@@ -68,6 +67,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
     skipped_old = 0
     skipped_dup = 0
     seen_urls: set[str] = set()
+    cache_updates = []
     for url, label in RSS_FEEDS.get(desk, []):
         try:
             etag, last_mod = store.feed_cache(url)
@@ -84,7 +84,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
             if resp.status_code == 304:
                 continue
             resp.raise_for_status()
-            store.save_feed_cache(url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"))
+            cache_updates.append((url, resp.headers.get("ETag"), resp.headers.get("Last-Modified")))
             parsed = feedparser.parse(resp.content)
             for entry in parsed.entries:
                 link = canonical_url(getattr(entry, "link", "") or "")
@@ -106,9 +106,6 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
                 if not title:
                     continue
                 item_id = article_id(link, title)
-                if store.has_seen(item_id):
-                    skipped_dup += 1
-                    continue
                 summary = strip_html(getattr(entry, "summary", "") or getattr(entry, "description", "") or "")
                 tag_list = hashtags.tags(desk, title)
                 tweet, chars = hashtags.tweet(title, link, tag_list)
@@ -131,7 +128,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
             errors.append(f"{label}: feed unreachable")
         time.sleep(0.12)
     collected.sort(key=lambda a: a.published or "", reverse=True)
-    return DeskResult(desk, collected[:limit], skipped_old, skipped_dup, errors)
+    return DeskResult(desk, collected[:limit], skipped_old, skipped_dup, errors, cache_updates)
 
 
 def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
@@ -172,9 +169,6 @@ def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
                 continue
             link = canonical_url(url)
             item_id = article_id(link, f"hn-{hid}")
-            if store.has_seen(item_id):
-                skipped_dup += 1
-                continue
             extra_tags = ["#Trending"] if (item.get("score") or 0) >= 100 else []
             tag_list = hashtags.tags("hackerNews", title, extra_tags)
             tweet, chars = hashtags.tweet(title, link, tag_list)
@@ -228,9 +222,6 @@ def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> Desk
                 slug = str(row.get("slug") or "")
                 page = f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com"
                 item_id = article_id(page, slug or title)
-                if store.has_seen(item_id):
-                    skipped_dup += 1
-                    continue
                 end = parse_date(str(row.get("endDate") or row.get("end_date_iso") or ""))
                 now = datetime.now(timezone.utc)
                 if end and end < now and not store.within_lookback(end, lookback):
@@ -276,6 +267,7 @@ SYMBOL_NAMES = {"^GSPC": "S&P 500", "^DJI": "Dow", "^IXIC": "Nasdaq"}
 
 
 def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult:
+    quote_updates = []
     errors: list[str] = []
     skipped_dup = 0
     articles: list[Article] = []
@@ -298,7 +290,7 @@ def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult
             if abs(change) < 0.0015 and last is not None:
                 skipped_dup += 1
                 continue
-            store.save_quote(symbol, snapshot)
+            quote_updates.append((symbol, snapshot))
             name = SYMBOL_NAMES.get(symbol) or meta.get("shortName") or meta.get("longName") or "Yahoo Finance"
             sign = "+" if change >= 0 else ""
             title = f"{name} {price:.2f} {sign}{change * 100:.2f}%"
@@ -327,7 +319,7 @@ def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult
             log.warning("market %s failed: %s", symbol, exc)
             errors.append(f"{symbol}: quote failed")
     articles.sort(key=lambda a: abs(float(a.extra.get("change") or 0)), reverse=True)
-    return DeskResult("markets", articles[:limit], 0, skipped_dup, errors)
+    return DeskResult("markets", articles[:limit], 0, skipped_dup, errors, quote_updates=quote_updates[:limit])
 
 
 WX = {
@@ -389,7 +381,6 @@ def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
         key = f"weather:{place}"
         if store.last_quote(key) == payload:
             return DeskResult("weather", [], 0, 1, [])
-        store.save_quote(key, payload)
         condition = WX.get(code, "Mixed")
         title = f"{place}: {int(temp)}°F {condition}"
         summary = f"Feels like {int(feel)}° · Wind {int(wind)} mph · Today {int(high)}/{int(low)}°F"
@@ -410,7 +401,7 @@ def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
             hashtags=tag_list,
             extra={"city": place},
         )
-        return DeskResult("weather", [article], 0, 0, [])
+        return DeskResult("weather", [article], 0, 0, [], quote_updates=[(key, payload)])
     except Exception as exc:
         log.warning("weather failed: %s", exc)
         return DeskResult("weather", [], 0, 0, ["Weather: Open-Meteo unreachable"])
@@ -435,24 +426,29 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
         futures = {pool.submit(fetch_desk, desk, store): desk for desk in ALL_DESKS}
         for fut in as_completed(futures):
             results.append(fut.result())
-    results.sort(key=lambda r: DESK_TITLES.get(r.desk, r.desk))
-    articles: list[Article] = []
-    seen_ids: set[str] = set()
-    seen_title_sets: list[set[str]] = []
+    results.extend(worldmonitor.fetch(LOOKBACK_HOURS, MAX_PER_DESK))
+    combined: dict[str, DeskResult] = {}
     for result in results:
-        for article in result.articles:
-            store.mark(article.id, article.url, article.title, article.desk)
-            if article.id in seen_ids:
-                continue
-            toks = title_tokens(article.title)
-            if any(is_near_duplicate_title(prev, toks) for prev in seen_title_sets):
-                continue
-            seen_ids.add(article.id)
-            if len(toks) >= 4:
-                seen_title_sets.append(toks)
-            articles.append(article)
+        dest = combined.setdefault(result.desk, DeskResult(result.desk, []))
+        dest.articles.extend(result.articles)
+        dest.skipped_old += result.skipped_old
+        dest.skipped_dup += result.skipped_dup
+        dest.source_errors.extend(result.source_errors)
+        dest.feed_cache_updates.extend(result.feed_cache_updates)
+        dest.quote_updates.extend(result.quote_updates)
+    results = sorted(combined.values(), key=lambda r: DESK_TITLES.get(r.desk, r.desk))
+    candidates = [a for r in results for a in r.articles]
+    journal = StoryStore(store.path.with_name("stories.sqlite"))
+    articles = journal.ingest([a.as_dict() for a in candidates])
+    for result in results:
+        for update in result.feed_cache_updates:
+            store.save_feed_cache(*update)
+        for update in result.quote_updates:
+            store.save_quote(*update)
+    for article in candidates:
+        store.mark(article.id, article.url, article.title, article.desk)
     store.prune_seen(older_than_days=SEEN_RETENTION_DAYS)
-    articles.sort(key=lambda a: a.published or "", reverse=True)
+    articles.sort(key=lambda a: a.get("published") or "", reverse=True)
     scanned = sum(len(r.articles) + r.skipped_old + r.skipped_dup for r in results)
     return {
         "fetched_at": iso(started),
@@ -460,12 +456,12 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
         "lookback_hours": LOOKBACK_HOURS,
         "total_articles": len(articles),
         "scanned": scanned,
-        "articles": [a.as_dict() for a in articles],
+        "articles": articles,
         "desks": [
             {
                 "desk": r.desk,
                 "title": DESK_TITLES.get(r.desk, r.desk),
-                "fresh": len(r.articles),
+                "fresh": sum(a["desk"] == r.desk for a in articles),
                 "skipped_old": r.skipped_old,
                 "skipped_dup": r.skipped_dup,
                 "errors": r.source_errors,
@@ -473,6 +469,6 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
             for r in results
         ],
         "categories": {
-            DESK_TITLES.get(r.desk, r.desk): [a.as_dict() for a in r.articles] for r in results
+            DESK_TITLES.get(r.desk, r.desk): [a for a in articles if a["desk"] == r.desk] for r in results
         },
     }

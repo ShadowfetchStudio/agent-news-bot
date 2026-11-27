@@ -1,7 +1,7 @@
 # Agent News Bot
 
 A local-first **news desk for AI agents**. Agent News Bot scans 14 topic "desks" from public,
-key-free sources, filters everything down to *only the stories you have not seen before*, generates
+key-free sources, groups related stories while preserving their sources, tracks new and changed reports, generates
 a ready-to-post tweet and hashtags for each item, and serves the fresh batch over a small
 token-authenticated HTTP API bound to `127.0.0.1`. An agent, script, or newsroom pipeline can ask
 "what's actually new right now?" and get a clean JSON answer instead of re-scraping the open web.
@@ -14,7 +14,9 @@ It ships as **two parallel implementations of the same design**:
   periodic fetch loop and a `latest.json` file snapshot for file-based consumers.
 
 Both speak the **same HTTP bridge API** and share the same freshness model, so an agent written
-against one works against the other.
+against one works against the other. An optional **World Monitor connector** adds digest headlines,
+location context and provider assessments. It is disabled by default; the existing key-free feeds
+work independently. See [World Monitor integration and durable delivery](docs/worldmonitor.md).
 
 ---
 
@@ -42,18 +44,15 @@ against one works against the other.
 
 - **Agent / automation authors** who need a deduplicated, time-bounded feed of current headlines
   and want to call one localhost endpoint instead of maintaining scrapers.
-- **Newsroom / social pipelines** that must avoid re-posting the same story: the built-in freshness
-  ledger guarantees each item is served once.
+- **Newsroom / social pipelines** that must avoid re-posting the same story: the durable event log provides independent consumer cursors and explicit acknowledgements. Consumers must process deliveries idempotently.
 - **Anyone who wants a private, keyless news aggregator** on their own machine — no accounts, no API
   keys, no third-party analytics.
 
 ## Key features
 
 - **14 desks** spanning general news, finance, tech/AI, prediction markets, and weather.
-- **Key-free sources.** Every source is a public RSS/Atom feed or an open JSON API — no source
-  requires an API key or login.
-- **"Only what's new."** A SQLite freshness ledger dedupes by canonical URL and enforces a lookback
-  window (default 12h). Ask twice and you won't get the same story twice.
+- **Key-free default sources.** Public RSS/Atom and JSON APIs work without keys. The optional World Monitor connector can use a self-hosted endpoint or an appropriately licensed hosted API.
+- **New stories and updates.** A SQLite story journal groups canonical URLs and similar headlines, preserves source links, and emits revisions for changed titles, summaries or added sources. The lookback window defaults to 12h. Snapshot reads are repeatable; use the event API for consumer-specific delivery.
 - **Social-ready output.** Each article carries a pre-composed `tweet` (280-char aware, counts the
   `t.co` 23-char URL cost) and a `hashtags` list built from desk tags + keyword extraction.
 - **Token-authenticated localhost bridge.** `GET /v1/fresh`, `/v1/desks`, `/v1/status`, and
@@ -138,16 +137,27 @@ against one works against the other.
 
 ## The freshness model
 
-An item's identity is the SHA-256 of its **canonicalized URL** (tracking params like `utm_*`,
-`fbclid`, `gclid`, `ocid` stripped; host lowercased; trailing slash removed), truncated to 24 hex
-chars. The `seen` table records every id served (automatically pruned after 30 days by default), so
-an item is emitted **exactly once**, while cross-desk fuzzy title matching suppresses near-identical
-headlines across outlets (e.g. NPR/BBC/AP). RSS feeds use conditional HTTP (`ETag` /
-`If-Modified-Since` → `304 Not Modified`) backed by a `feed_cache` table to minimize bandwidth. A
-configurable **lookback window** (default 12h) drops anything older. For `markets` and `weather`,
-a `quotes` table stores the last value so unchanged (or sub-0.15% market) readings are suppressed as
-noise. The result: repeated calls return only genuinely new, recent stories, and an empty result
-means "the desks are current" — not an error.
+An article identity is derived from its canonical URL. Tracking parameters are removed.
+Recent similar headlines are grouped heuristically into a story, with every source retained.
+Grouping is not independent verification: syndicated copies can describe the same event.
+
+`stories.sqlite` stores the latest story, source metadata, and an ordered journal of immutable
+revisions. A new source or changed title/summary creates an update; changing provider scores,
+collection timestamps or mention counts alone does not. World Monitor snippets do not overwrite
+a direct RSS summary at the same URL. Provider assessments retain their provenance and are not
+promoted to verified facts. Stories and events are retained until explicitly managed by the operator;
+there is no automatic event-history pruning in this first version.
+
+`GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.
+Linux may retain still-fresh items when a desk has no changes. For durable delivery use
+`GET /v1/events?consumer=<name>` and acknowledge only after successful processing with
+`POST /v1/events/ack?consumer=<name>&through=<next_cursor>`. Each consumer has its own cursor.
+Unacknowledged events are redelivered, including after a restart. This is **at-least-once**, not
+exactly-once delivery: deduplicate external side effects by event sequence.
+
+Existing `seen.sqlite` data is preserved. On the first run after upgrading, articles fetched into
+the new journal are emitted as new even if the legacy seen ledger already contains their URLs.
+Markets and weather retain their existing change filters. RSS retains conditional HTTP caching.
 
 ## The bridge API
 
@@ -161,6 +171,8 @@ without a valid token or `405` on disallowed HTTP methods.
 | `GET /health` | no | Liveness probe; returns app name + bridge URL. |
 | `GET /v1/fresh?desk=<desk>&limit=<n>` | yes | The current fresh batch. Optional `desk` filter and `limit` (default 100, max 500; `400` on invalid value). |
 | `GET /v1/articles/<id>` | yes | Fetch a single article from the current batch by its 24-hex id (`404` if absent). |
+| `GET /v1/events?consumer=<name>&limit=<n>` | yes | Durable ordered revisions after that consumer's acknowledged cursor (limit 1–500). |
+| `POST /v1/events/ack?consumer=<name>&through=<seq>` | yes | Acknowledge a delivered prefix; cannot advance past events offered to that consumer. |
 | `GET /v1/desks` | yes | Per-desk counts: fresh, skipped-old, skipped-dup, and source errors. |
 | `GET /v1/status` | yes | Snapshot summary: total fresh, `fetched_at`, whether a fetch is in flight. |
 | `POST /v1/fetch` | yes | Force an immediate refresh; returns the new total. |
@@ -193,16 +205,14 @@ On macOS the token is shown in **Settings → Bridge** and is written to
 
 - **Local-first.** The service runs on your machine and binds to `127.0.0.1`. Nothing is exposed to
   the network by default.
-- **No accounts, no keys, no telemetry.** No source requires credentials; the app phones no analytics
-  home.
-- **The only persisted state** is a SQLite ledger of story ids/urls/titles you've already seen (for
-  dedup) and last market/weather values (for change detection), plus an optional JSON export/snapshot
-  of the current batch. No personal data is collected.
+- **No telemetry.** The default sources need no credentials. Optional World Monitor may require a provider key; macOS stores it in Keychain, Linux reads it from the service environment.
+- **Persisted state:** the existing freshness ledger, feed cache and snapshots, plus `stories.sqlite`
+  containing source headlines/snippets/links, provider metadata, immutable revisions and consumer cursors.
+  This is a research record, not an archive of full publisher articles.
 - **The bearer token is generated on first run** (macOS: a UUID-derived 32-hex string written 0600;
   Linux: `secrets.token_hex(16)` written 0640) and never leaves the machine. It is **not** in source
   control. Optional integration tokens on macOS are stored in the **Keychain**, not in plists.
-- **Content is fetched, not redistributed.** Agent News Bot links to and summarizes third-party
-  articles at request time; it stores headlines/links for dedup but is not a content archive. Each
+- **Source rights remain separate.** Agent News Bot stores source metadata and excerpts and serves them to local consumers; it does not grant permission to republish upstream content. Each
   upstream source's own terms govern use of its feed.
 
 ## Build & run — macOS
@@ -331,5 +341,4 @@ Like this project? You can [buy me a coffee](https://www.buymeacoffee.com/shadow
 
 **MIT** (see [LICENSE](LICENSE)). The project uses only system frameworks on macOS and
 permissively-licensed Python dependencies (`feedparser`, `requests`), so there is no copyleft
-obligation. Agent News Bot fetches and links to third-party news at runtime and redistributes no news
-content itself; each upstream source's terms govern use of its feed.
+obligation. The World Monitor connector is independently implemented against its REST contract and embeds no World Monitor platform code. Source-code licensing does not grant rights to upstream news or hosted-service outputs; each provider's terms govern that use.

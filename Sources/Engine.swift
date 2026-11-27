@@ -51,7 +51,7 @@ final class NewsEngine: ObservableObject {
     @Published var selectedDesk: Desk? = .breaking
     @Published var selected: Article?
     @Published var isFetching = false
-    @Published var status = "Ready. Fetch Fresh pulls only unseen stories inside the lookback window."
+    @Published var status = "Ready. Fetch Fresh finds new stories and updates inside the lookback window."
     @Published var report: FetchReport?
     @Published var hermes = AgentStatus(kind: .hermes, label: "Hermes", detail: "Checking…", ready: false)
     @Published var openclaw = AgentStatus(kind: .openclaw, label: "OpenClaw", detail: "Checking…", ready: false)
@@ -62,6 +62,7 @@ final class NewsEngine: ObservableObject {
     let settings = SettingsStore.shared
     let store = FreshnessStore(path: AppPaths.seenDB)
     let bridge = AgentBridge()
+    let stories = StoryStore(path: AppPaths.support.appendingPathComponent("stories.sqlite"))
 
     private let snapshot = LockedSnapshot()
 
@@ -86,6 +87,7 @@ final class NewsEngine: ObservableObject {
     func start() {
         settings.save()
         let snap = snapshot
+        bridge.stories = stories
         bridge.articlesProvider = { snap.readArticles() }
         bridge.desksProvider = { snap.readDesks() }
         bridge.statusProvider = { snap.readStatus() }
@@ -106,7 +108,8 @@ final class NewsEngine: ObservableObject {
         guard !isFetching else { return }
         isFetching = true
         snapshot.setFetching(true)
-        status = "Scanning desks for unseen stories…"
+        defer { isFetching = false; snapshot.setFetching(false) }
+        status = "Scanning desks for new stories and updates…"
         let started = Date()
         let lookback = settings.lookbackHours
         let maxItems = settings.maxPerDesk
@@ -138,24 +141,33 @@ final class NewsEngine: ObservableObject {
             }
         }
 
-        results.sort { $0.desk.title < $1.desk.title }
-        var merged: [Article] = []
-        var seenIDs = Set<String>()
-        var seenTitleSets: [Set<String>] = []
-
-        for result in results {
-            for article in result.articles {
-                store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
-                if seenIDs.contains(article.id) { continue }
-                let tokens = FreshnessStore.titleTokens(article.title)
-                if seenTitleSets.contains(where: { FreshnessStore.isNearDuplicateTitle($0, tokens) }) {
-                    continue
-                }
-                seenIDs.insert(article.id)
-                if tokens.count >= 4 { seenTitleSets.append(tokens) }
-                merged.append(article)
-            }
+        let wm = await WorldMonitorClient.fetch(enabled: settings.worldMonitorEnabled, base: settings.worldMonitorURL,
+            key: settings.worldMonitorKey, variant: settings.worldMonitorVariant, lookback: lookback, limit: maxItems)
+        for original in wm {
+            var result = original
+            if !enabled.contains(result.desk) { result.articles = [] }
+            if result.articles.isEmpty && result.sourceErrors.isEmpty { continue }
+            if let i = results.firstIndex(where: { $0.desk == result.desk }) {
+                results[i].articles += result.articles
+                results[i].skippedOld += result.skippedOld
+                results[i].sourceErrors += result.sourceErrors
+            } else { results.append(result) }
         }
+        results.sort { $0.desk.title < $1.desk.title }
+        let candidates = results.flatMap(\.articles)
+        var merged: [Article]
+        do { merged = try stories.ingest(candidates) }
+        catch { status = "Story storage failed. No deliveries acknowledged; retry the fetch."; return }
+        for result in results {
+            for update in result.cacheUpdates {
+                store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified)
+            }
+            for (symbol, payload) in result.quoteUpdates { store.saveQuote(symbol, payload: payload) }
+        }
+        for article in candidates {
+            store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
+        }
+        for i in results.indices { results[i].articles = merged.filter { $0.desk == results[i].desk } }
         merged.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         store.pruneSeen(olderThanDays: 30)
 
@@ -228,23 +240,10 @@ final class NewsEngine: ObservableObject {
         let payload: [String: Any] = [
             "fetched_at": fetchedAt,
             "total_articles": articles.count,
+            "articles": articles.map(\.wire),
             "lookback_hours": settings.lookbackHours,
             "categories": Dictionary(uniqueKeysWithValues: Desk.allCases.map { desk in
-                (desk.title, articles.filter { $0.desk == desk }.map { article -> [String: Any] in
-                    [
-                        "id": article.id,
-                        "desk": article.desk.rawValue,
-                        "title": article.title,
-                        "url": article.url,
-                        "source": article.source,
-                        "category": article.desk.title,
-                        "published": article.published.map { ISO8601DateFormatter().string(from: $0) } ?? "",
-                        "summary": article.summary,
-                        "tweet": article.tweet,
-                        "tweet_chars": article.tweetChars,
-                        "hashtags": article.hashtags
-                    ]
-                })
+                (desk.title, articles.filter { $0.desk == desk }.map(\.wire))
             })
         ]
         let name = "agentnewsbot_\(Int(Date().timeIntervalSince1970)).json"
@@ -287,13 +286,13 @@ final class NewsEngine: ObservableObject {
         let skill = """
         ---
         name: agent-news-bot
-        description: Pull only fresh, unseen news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
+        description: Pull new and updated news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
         version: 1.1.0
         ---
 
         # Agent News Bot
 
-        Agent News Bot is a macOS newsroom on this machine. It keeps a freshness ledger and only serves stories that have not been shown before and are inside the lookback window.
+        Agent News Bot is a macOS newsroom on this machine. It keeps a durable story journal. Snapshot reads can repeat. Use consumer events and acknowledge only after processing.
 
         Base URL: \(bridge.endpoint)
         Token file (0600): `\(tokenPath)`
@@ -304,7 +303,9 @@ final class NewsEngine: ObservableObject {
 
         ## Calls
         - `GET /health`
-        - `GET /v1/fresh?desk=<desk>&limit=<n>` — current unseen batch
+        - `GET /v1/fresh?desk=<desk>&limit=<n>` — repeatable current snapshot
+        - `GET /v1/events?consumer=<name>` — persistent ordered revisions
+        - `POST /v1/events/ack?consumer=<name>&through=<next_cursor>` — acknowledge processed events only
         - `GET /v1/articles/<id>` — single article lookup
         - `GET /v1/desks` — per-desk counts and source errors
         - `GET /v1/status` — snapshot status

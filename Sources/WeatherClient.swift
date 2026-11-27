@@ -44,7 +44,6 @@ enum WeatherClient {
             if store.lastQuote("weather:\(place)") == payload {
                 return DeskResult(desk: .weather, articles: [], skippedOld: 0, skippedDup: 1, sourceErrors: [])
             }
-            store.saveQuote("weather:\(place)", payload: payload)
 
             let title = "\(place): \(Int(temp))°F \(condition)"
             let summary = "Feels like \(Int(feel))° · Wind \(Int(wind)) mph · Today \(Int(high))/\(Int(low))°F"
@@ -65,7 +64,7 @@ enum WeatherClient {
                 hashtags: tags,
                 extra: ["city": place]
             )
-            return DeskResult(desk: .weather, articles: [article], skippedOld: 0, skippedDup: 0, sourceErrors: [])
+            return DeskResult(desk: .weather, articles: [article], skippedOld: 0, skippedDup: 0, sourceErrors: [], quoteUpdates: [("weather:\(place)", payload)])
         } catch {
             errors.append("Weather: Open-Meteo unreachable")
             return DeskResult(desk: .weather, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: errors)
