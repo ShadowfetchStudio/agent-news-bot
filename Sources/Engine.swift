@@ -9,7 +9,7 @@ private final class LockedSnapshot: @unchecked Sendable {
     private var fetchedAt: String?
     private var fetching = false
 
-    func update(articles: [Article], desks: [DeskResult], fetchedAt: String) {
+    func update(articles: [Article], desks: [DeskResult], fetchedAt: String?) {
         lock.lock()
         self.articles = articles
         self.desks = desks
@@ -38,7 +38,7 @@ private final class LockedSnapshot: @unchecked Sendable {
     func readStatus() -> BridgeStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        return BridgeStatusSnapshot(fresh: articles.count, fetchedAt: fetchedAt, fetching: fetching)
+        return BridgeStatusSnapshot(fresh: articles.filter { $0.wire["carried"] as? Bool != true }.count, fetchedAt: fetchedAt, fetching: fetching)
     }
 }
 
@@ -67,6 +67,8 @@ final class NewsEngine: ObservableObject {
 
     private let snapshot = LockedSnapshot()
     private var completedFetches = 0
+    private var started = false
+    private var autoRefreshTask: Task<Void, Never>?
 
     var filtered: [Article] {
         var items = articles
@@ -87,6 +89,9 @@ final class NewsEngine: ObservableObject {
     var bridgeToken: String { loadOrCreateToken() }
 
     func start() {
+        guard !started else { return }
+        started = true
+        restoreSnapshot()
         settings.save()
         let snap = snapshot
         bridge.stories = stories
@@ -102,6 +107,41 @@ final class NewsEngine: ObservableObject {
             status = "Bridge failed to bind on 127.0.0.1:\(settings.bridgePort) (port in use)."
         }
         Task { await refreshAgents() }
+        configureAutomaticRefresh()
+    }
+
+    private func restoreSnapshot() {
+        let url = AppPaths.exports.appendingPathComponent("latest.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= 16 * 1024 * 1024 else { throw StoryStore.Failure.database }
+            let data = try Data(contentsOf: url)
+            guard data.count <= 16 * 1024 * 1024,
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw StoryStore.Failure.database }
+            let restored = SnapshotPolicy.restore(payload, lookback: settings.lookbackHours, enabled: settings.enabledDesks, limit: settings.maxPerDesk)
+            articles = restored.articles; desks = restored.desks; selected = articles.first
+            coverageState = Coverage.summary(desks.flatMap(\.coverageChecks))["state"] as? String ?? "unknown"
+            snapshot.update(articles: articles, desks: desks, fetchedAt: restored.fetchedAt)
+            status = "Restored \(articles.count) stories. Source checks are from the previous session."
+        } catch { status = "Saved snapshot could not be restored. The story journal is unchanged; fetch again." }
+    }
+
+    func configureAutomaticRefresh() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = nil
+        guard settings.autoRefresh else { return }
+        let delay = UInt64(min(120, max(5, settings.refreshMinutes))) * 60 * 1_000_000_000
+        autoRefreshTask = Task { [weak self] in
+            // Opening/reopening windows must not create overlapping refresh loops.
+            // First check starts after a short grace period; subsequent checks use the selected interval.
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.fetchFresh()
+                do { try await Task.sleep(nanoseconds: delay) } catch { return }
+            }
+        }
     }
 
     enum BridgeFetchFailure: Error { case unavailable, busy, failed }
@@ -189,6 +229,10 @@ final class NewsEngine: ObservableObject {
         for article in candidates {
             store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
         }
+        let changedCount = merged.count
+        merged = SnapshotPolicy.merge(previous: articles, fresh: merged,
+            previousFetchedAt: snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse), lookback: lookback,
+            enabled: enabled, limit: maxItems)
         for i in results.indices { results[i].articles = merged.filter { $0.desks.contains(results[i].desk) } }
         merged.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         store.pruneSeen(olderThanDays: 30)
@@ -198,21 +242,21 @@ final class NewsEngine: ObservableObject {
         desks = results
         coverageState = Coverage.summary(results.flatMap(\.coverageChecks))["state"] as? String ?? "unknown"
         articles = merged
-        selected = merged.first
+        selected = merged.first { $0.id == selected?.id } ?? merged.first
         snapshot.update(articles: merged, desks: results, fetchedAt: fetchedAtISO)
 
         let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
-        report = FetchReport(started: started, finished: finished, freshCount: merged.count, scanned: scanned, desks: results)
+        report = FetchReport(started: started, finished: finished, freshCount: changedCount, scanned: scanned, desks: results)
         exportJSON(fetchedAt: fetchedAtISO)
         completedFetches += 1
         let errors = results.flatMap(\.sourceErrors).count
         let coverageLabel = "Coverage: " + coverageState + " · "
-        if merged.isEmpty {
+        if changedCount == 0 {
             status = errors > 0
                 ? "No new stories returned · \(errors) source warnings. Full coverage could not be confirmed."
                 : "No new or updated stories in the last \(Int(lookback))h."
         } else {
-            status = "\(merged.count) new or updated stories · \(errors) source warnings"
+            status = "\(changedCount) new or updated stories · \(errors) source warnings"
         }
         status = coverageLabel + status
         isFetching = false

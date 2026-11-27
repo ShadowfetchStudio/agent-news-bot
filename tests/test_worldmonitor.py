@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "Coverage", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -830,3 +830,55 @@ def test_native_rss_coverage_real_http(swift_harness, tmp_path, body, expected):
         result = swift(swift_harness, "rss", url, tmp_path / "cache.sqlite", 12, 20)
         assert result["coverage"]["state"] == expected
         assert not result["articles"]
+
+
+def test_native_snapshot_restores_without_renewing_dates_or_coverage(swift_harness, tmp_path):
+    recent = article(); recent.update(first_seen="2026-11-27T10:00:00Z")
+    ancient = dict(article("https://example.com/old"), published="", first_seen="2020-01-01T00:00:00Z")
+    undated = dict(article("https://example.com/undated"), published="")
+    future = dict(article("https://example.com/future"), published="2030-01-01T00:00:00Z")
+    payload = {"fetched_at": "2026-11-27T11:00:00Z", "articles": [recent, ancient, undated, future],
+               "desks": [{"desk": "science", "coverage": {"sources": [{"source": "Fixture", "provider": "direct", "state": "success", "checked_at": "2026-11-27T11:00:00Z"}]}}]}
+    path = tmp_path / "snapshot.json"; path.write_text(json.dumps(payload))
+    result = swift(swift_harness, "snapshot", path)
+    assert {a["id"] for a in result["articles"]} == {recent["id"], undated["id"]}
+    assert all(a["carried"] for a in result["articles"])
+    assert result["desks"][0]["fresh"] == 0
+    assert result["desks"][0]["coverage"]["state"] == "stale"
+    restored_undated = next(a for a in result["articles"] if a["id"] == undated["id"])
+    assert restored_undated["first_seen"] == "2026-11-27T11:00:00Z"
+    assert result["fetched_at"] == payload["fetched_at"]
+
+
+def test_native_new_story_does_not_erase_other_current_stories(swift_harness, tmp_path):
+    old = article(); replacement = dict(old, summary="Corrected", change="updated")
+    old2 = article("https://example.com/retained")
+    new = article("https://example.com/new")
+    path = tmp_path / "batch.json"; path.write_text(json.dumps({"previous": [old, old2], "fresh": [replacement, new]}))
+    rows = swift(swift_harness, "snapshot-merge", path)["articles"]
+    assert len(rows) == 3
+    assert next(a for a in rows if a["id"] == old["id"])["summary"] == "Corrected"
+    assert next(a for a in rows if a["id"] == old2["id"])["carried"] is True
+    assert sum(not a["carried"] for a in rows) == 2
+
+
+def test_native_isolated_app_paths_and_credentials(swift_harness, tmp_path):
+    env = dict(os.environ, AGENT_NEWSBOT_HOME=str(tmp_path / "isolated"))
+    first = json.loads(subprocess.check_output([str(swift_harness), "paths"], env=env))
+    assert first["support"] == str(tmp_path / "isolated")
+    assert first["bundle"].startswith("ai.shadowfetch.agentnewsbot.test.")
+    env["AGENT_NEWSBOT_HOME"] = str(tmp_path / "other")
+    second = json.loads(subprocess.check_output([str(swift_harness), "paths"], env=env))
+    assert second["bundle"] != first["bundle"]
+
+
+def test_linux_new_story_does_not_erase_other_current_stories(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "HOME", tmp_path); monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+    state = server.NewsState()
+    stamp = datetime.now(timezone.utc).isoformat()
+    old = dict(article(), published=stamp)
+    new = dict(article("https://example.com/new"), published=stamp, change="new")
+    result = state._keep_live_desks({"articles": [old], "fetched_at": stamp},
+                                  {"articles": [new], "fetched_at": stamp, "desks": [{"desk": "science", "fresh": 1}]})
+    assert result["total_articles"] == 2
+    assert (result["desks"][0]["new"], result["desks"][0]["carried"]) == (1, 1)

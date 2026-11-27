@@ -25,7 +25,7 @@ struct ContentView: View {
                 Button {
                     engine.selectedDesk = nil
                 } label: {
-                    Label("All fresh", systemImage: "square.grid.2x2")
+                    Label("All stories", systemImage: "square.grid.2x2")
                 }
                 .buttonStyle(.plain)
                 ForEach(Desk.allCases) { desk in
@@ -87,7 +87,7 @@ struct ContentView: View {
                     Image(systemName: "sparkles")
                         .font(.largeTitle)
                         .foregroundStyle(Theme.gold)
-                    Text("No fresh stories on this desk")
+                    Text("No stories in this desk’s lookback window")
                         .font(.title3.weight(.semibold))
                     Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Coverage to inspect source failures.")
                         .foregroundStyle(Theme.textMed)

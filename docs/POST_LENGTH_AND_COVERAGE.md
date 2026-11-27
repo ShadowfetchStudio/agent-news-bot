@@ -42,6 +42,6 @@ Per-desk counts have matching meanings on both runtimes:
 | `carried` | Previously displayed stories retained without a new revision |
 | `displayed` | `fresh + carried` |
 
-One story may belong to multiple desks, so summing desk counts can double-count stories. Linux `/v1/status.fresh` excludes carried rows and `displayed` counts all snapshot rows. The native app's current fetch behavior replaces the batch, so carried is zero until restoration/carry-over is enabled.
+One story may belong to multiple desks, so summing desk counts can double-count stories. Linux `/v1/status.fresh` excludes carried rows and `displayed` counts all snapshot rows. Both apps retain eligible previous stories, mark them carried and replace them by stable ID when a new revision arrives. Restored source checks become stale; see `SNAPSHOT_AND_REFRESH.md`.
 
 Parser checks also reject missing weather observations instead of fabricating zero-valued forecasts, surface Hacker News item fetch failures, and reject invalid prediction-market/index payload shapes.

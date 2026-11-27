@@ -4,6 +4,22 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "snapshot" {
+            let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String: Any]
+            let restored = SnapshotPolicy.restore(value, lookback: 12, enabled: [.science, .tech], limit: 20,
+                now: Date(timeIntervalSince1970: 1795780800))
+            try output(["articles": restored.articles.map(\.wire), "desks": restored.desks.map(\.wire), "fetched_at": restored.fetchedAt ?? ""]); return
+        }
+        if args[1] == "snapshot-merge" {
+            let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String: Any]
+            let old = try (value["previous"] as! [[String: Any]]).map { try Article.fromWire($0) }
+            let fresh = try (value["fresh"] as! [[String: Any]]).map { try Article.fromWire($0) }
+            try output(["articles": SnapshotPolicy.merge(previous: old, fresh: fresh, previousFetchedAt: nil, lookback: 12,
+                enabled: [.science, .tech], limit: 20, now: Date(timeIntervalSince1970: 1795780800)).map(\.wire)]); return
+        }
+        if args[1] == "paths" {
+            try output(["support": AppPaths.support.path, "bundle": AppPaths.bundleId]); return
+        }
         if args[1] == "desk-counts" {
             let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: Any]]
             let result = DeskResult(desk: .science, articles: try rows.map { try Article.fromWire($0) }, skippedOld: 0, skippedDup: 0, sourceErrors: [])

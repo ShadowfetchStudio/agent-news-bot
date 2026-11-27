@@ -51,7 +51,7 @@ struct AgentNewsBotApp: App {
                 Task { await engine.fetchFresh() }
             }
             .disabled(engine.isFetching)
-            Text("\(engine.articles.count) fresh")
+            Text("\(engine.articles.count) displayed")
             Divider()
             Button("Open Desk") {
                 NSApp.activate(ignoringOtherApps: true)

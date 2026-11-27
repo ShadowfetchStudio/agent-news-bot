@@ -6,6 +6,8 @@ import Combine
 final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
 
+    @Published var autoRefresh: Bool
+    @Published var refreshMinutes: Int
     @Published var lookbackHours: Double
     @Published var maxPerDesk: Int
     @Published var weatherCity: String
@@ -19,9 +21,11 @@ final class SettingsStore: ObservableObject {
     @Published var worldMonitorVariant: String
     @Published var marketSymbols: String
 
-    private let defaults = UserDefaults.standard
+    private let defaults = UserDefaults(suiteName: AppPaths.bundleId) ?? .standard
 
     private init() {
+        autoRefresh = defaults.object(forKey: "autoRefresh") as? Bool ?? true
+        refreshMinutes = min(120, max(5, defaults.object(forKey: "refreshMinutes") as? Int ?? 15))
         worldMonitorEnabled = defaults.bool(forKey: "worldMonitorEnabled")
         worldMonitorURL = defaults.string(forKey: "worldMonitorURL") ?? "http://127.0.0.1:3000"
         worldMonitorVariant = defaults.string(forKey: "worldMonitorVariant") ?? "full"
@@ -42,6 +46,8 @@ final class SettingsStore: ObservableObject {
     }
 
     func save() {
+        defaults.set(autoRefresh, forKey: "autoRefresh")
+        defaults.set(refreshMinutes, forKey: "refreshMinutes")
         defaults.set(worldMonitorEnabled, forKey: "worldMonitorEnabled")
         defaults.set(worldMonitorURL, forKey: "worldMonitorURL")
         defaults.set(worldMonitorVariant, forKey: "worldMonitorVariant")

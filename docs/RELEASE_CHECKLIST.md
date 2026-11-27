@@ -88,3 +88,13 @@ Remaining larger work includes weighted X counting, complete coverage/count repo
 - Fixed additional silent failures: Hacker News item fetches surface warnings, invalid index/prediction-market payload shapes fail visibly, missing weather fields cannot fabricate zero-valued forecasts, invalid quote prices are errors.
 - Last completed validation: 87 tests passed on macOS; 59 passed and 28 native-Mac skips on Pop!_OS. Native app build and strict ad-hoc signing passed. The vendored npm build dependencies had no known vulnerabilities reported by npm audit at this check; the wider release dependency scan remains open.
 - Remaining: actual GUI walkthrough, snapshot restoration/automatic refresh, persistent source history/backoff, setup/rotation, editorial and automation features, safe upgrades and final release verification. The coverage state describes the last attempt with explicit check times; it is not a continuous uptime assertion.
+
+## Snapshot/refresh implementation (validation in progress)
+
+- Added Mac startup restoration, immutable fallback-date policy, stale restored coverage, future/expired-row rejection and a 16 MiB snapshot ceiling on both platforms.
+- Both runtimes retain eligible previous stories alongside new arrivals, replace corrections by stable ID, and bound displayed rows. The Mac keeps the selected story when possible and exposes displayed versus fresh status counts.
+- Added configurable Mac automatic refresh (15-minute default, 5–120 minutes) and a guarded one-time engine start. Actual GUI and timer walkthrough remain required before that checklist item is complete.
+- Added an explicit isolated native testing namespace: AGENT_NEWSBOT_HOME controls data, preferences and the Keychain service independently of the production app.
+- Five targeted snapshot/isolation tests passed on Mac, including pre-existing Linux restoration expiry coverage. Full-suite/build results are recorded after completion below.
+
+Snapshot batch validation: 93 tests passed on macOS; 60 passed with 33 native-Mac skips on Pop!_OS. The Apple Silicon app built and passed strict ad-hoc signing. Snapshot policy and isolated namespaces are verified; the actual GUI/timer walkthrough and existing agent subprocess warnings remain open. The previous Linux development wheel was separately installed outside the checkout and verified to contain/run the shared parser (CJK regression returns 280); final release assets will be rebuilt after all remaining changes.

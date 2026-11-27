@@ -233,6 +233,7 @@ final class AgentBridge: @unchecked Sendable {
                     "fresh": st.fresh,
                     "fetching": st.fetching
                 ]
+                payload["displayed"] = articlesProvider().count
                 payload["fetched_at"] = st.fetchedAt ?? NSNull()
                 payload["coverage"] = Coverage.summary(desksProvider().flatMap(\.coverageChecks))
                 let currentJob = jobLock.withLock { job }

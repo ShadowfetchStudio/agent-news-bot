@@ -12,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .config import FETCH_INTERVAL, HOME, LOOKBACK_HOURS, PORT, SHARED
+from .config import FETCH_INTERVAL, HOME, LOOKBACK_HOURS, PORT, SHARED, MAX_PER_DESK, ALL_DESKS
+from . import coverage
 from .engine import fetch_all
 from .store import FreshnessStore
 from .stories import StoryStore
@@ -48,10 +49,20 @@ class NewsState:
     def _load_snapshot(self) -> None:
         if self.latest_path.exists():
             try:
+                if self.latest_path.stat().st_size > 16 * 1024 * 1024:
+                    raise ValueError("Snapshot exceeds 16 MiB")
                 loaded = json.loads(self.latest_path.read_text())
                 # Restoring a snapshot must not renew its publication/observation date.
                 empty = dict(loaded, articles=[], desks=[dict(d, fresh=0) for d in loaded.get("desks", [])])
                 self.snapshot = self._keep_live_desks(loaded, empty)
+                for desk in self.snapshot.get("desks", []):
+                    checks = desk.get("coverage", {}).get("sources", [])
+                    for check in checks:
+                        if check.get("state") in ("success", "partial"):
+                            check["state"] = "stale"
+                        check["detail"] = "Restored snapshot; not checked in this session. " + check.get("detail", "")
+                    desk["coverage"] = coverage.summary(checks)
+                self.snapshot["coverage"] = coverage.summary([c for d in self.snapshot.get("desks", []) for c in d.get("coverage", {}).get("sources", [])])
             except Exception:
                 pass
 
@@ -144,11 +155,11 @@ class NewsState:
         def live(item: dict, batch: dict) -> bool:
             dt = self._story_time(item, batch.get("fetched_at"))
             return dt is not None and cutoff <= dt <= now + timedelta(minutes=5)
-        new_by_desk = {row["desk"]: row.get("fresh", 0) for row in snapshot.get("desks") or []}
+        enabled = {row["desk"] for row in snapshot.get("desks") or []} or set(ALL_DESKS)
         kept = [dict(item, carried=False) for item in snapshot.get("articles") or [] if live(item, snapshot)]
         seen = {item["id"] for item in kept}
         for item in previous.get("articles") or []:
-            if new_by_desk.get(item.get("desk"), 1) != 0 or item.get("id") in seen:
+            if not enabled.intersection(item.get("desks", [item.get("desk")])) or item.get("id") in seen:
                 continue
             if live(item, previous):
                 carried = dict(item, carried=True)
@@ -157,6 +168,7 @@ class NewsState:
                 kept.append(carried)
                 seen.add(item["id"])
         kept.sort(key=lambda item: self._story_time(item, snapshot.get("fetched_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        kept = kept[:max(0, MAX_PER_DESK) * len(enabled)]
         snapshot["articles"] = kept
         snapshot["total_articles"] = len(kept)
         categories: dict[str, list] = {}

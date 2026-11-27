@@ -12,6 +12,9 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Freshness") {
+                Toggle("Refresh automatically while the app is running", isOn: $settings.autoRefresh)
+                Stepper("Refresh every \(settings.refreshMinutes) minutes", value: $settings.refreshMinutes, in: 5...120, step: 5)
+                    .disabled(!settings.autoRefresh)
                 Stepper(value: $settings.lookbackHours, in: 2...48, step: 1) {
                     Text("Lookback \(Int(settings.lookbackHours)) hours")
                 }
@@ -99,6 +102,7 @@ struct SettingsView: View {
         .onDisappear {
             settings.save()
             engine.applyBridgeSettings()
+            engine.configureAutomaticRefresh()
         }
     }
     private func saveCredentials() {

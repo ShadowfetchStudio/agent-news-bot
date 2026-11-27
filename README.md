@@ -11,14 +11,14 @@ token-authenticated HTTP API bound to `127.0.0.1`. An agent, script, or newsroom
 It ships as **two parallel implementations of the same design**:
 
 - **macOS app** (`Sources/`) — a native SwiftUI desktop newsroom with a dark UI, menu-bar extra,
-  JSON exports, and optional one-click handoff to local agent runtimes.
+  restored snapshots, configurable automatic refresh, JSON exports, and optional one-click handoff to local agent runtimes.
 - **Linux service** (`linux/agent_newsbot/`) — a headless Python daemon (systemd-friendly) with a
   periodic fetch loop and a `latest.json` file snapshot for file-based consumers.
 
 Both speak the **same HTTP bridge API** and share the same freshness model, so an agent written
 against one works against the other. An optional **World Monitor connector** adds digest headlines,
 location context and provider assessments. It is disabled by default; the existing key-free feeds
-work independently. See [World Monitor integration and durable delivery](docs/worldmonitor.md).
+work independently. See [World Monitor integration and durable delivery](docs/worldmonitor.md), [post validation and coverage](docs/POST_LENGTH_AND_COVERAGE.md), and [snapshots and refresh](docs/SNAPSHOT_AND_REFRESH.md).
 
 ---
 
