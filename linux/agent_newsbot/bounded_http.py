@@ -1,7 +1,9 @@
 """Loopback HTTP transport with bounded workers and absolute socket deadlines."""
 from __future__ import annotations
 
+import json
 import socket
+from .api_contract import error_payload
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -24,8 +26,10 @@ class BoundedHTTPServer(ThreadingHTTPServer):
         if not self._slots.acquire(blocking=False):
             try:
                 request.settimeout(0.1)
-                request.sendall(b'HTTP/1.0 503 Service Unavailable\r\n'
-                                b'Connection: close\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n')
+                body = json.dumps(error_payload(503, {"error": "connection capacity reached"})).encode()
+                header = ("HTTP/1.0 503 Service Unavailable\r\nConnection: close\r\nRetry-After: 1\r\n"
+                          "Content-Type: application/json\r\nContent-Length: " + str(len(body)) + "\r\n\r\n").encode()
+                request.sendall(header + body)
             except OSError:
                 pass
             finally:

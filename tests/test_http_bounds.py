@@ -1,5 +1,6 @@
 """Real-socket regression tests for malformed and slow bridge clients."""
 import contextlib
+import json
 import socket
 import sys
 import threading
@@ -69,7 +70,10 @@ def test_connection_cap_and_idle_header_deadline_release_capacity():
             client.sendall(b'GET /health HTTP/1.1\r\nHost:')
         wait_for(lambda: active(httpd) == 2)
         with connect(httpd) as extra:
-            assert b' 503 ' in extra.recv(8192)
+            raw=b''
+            while chunk:=extra.recv(8192): raw+=chunk
+            assert b' 503 ' in raw
+            assert json.loads(raw.split(b'\r\n\r\n',1)[1])['error_detail']['code']=='temporarily_unavailable'
         wait_for(lambda: active(httpd) == 0)
         for client in clients:
             assert client.recv(8192) == b''

@@ -187,6 +187,7 @@ a claim of power-loss durability. Archive cleanup remains best-effort after a su
 
 | Method & path | Auth | Description |
 |---------------|------|-------------|
+| `GET /v1/capabilities` | yes | Versioned features, routes, limits and error contract; support is separate from live readiness. |
 | `GET /health` | no | Liveness probe; returns app name + bridge URL. |
 | `GET /v1/fresh?desk=<desk>&limit=<n>` | yes | The current fresh batch. Optional `desk` filter and `limit` (default 100, max 500; `400` on invalid value). |
 | `GET /v1/articles/<id>` | yes | Fetch a single article from the current batch by its 24-hex id (`404` if absent). |
@@ -385,3 +386,5 @@ The Linux installer defaults the CLI to the service's state directory. Run servi
 operations as the service account, for example `sudo -u agentnewsbot agent-newsbot status`,
 using the configured service username if it differs. For a separate user instance, set
 `AGENT_NEWSBOT_HOME` explicitly. Do not make the service token world-readable.
+
+See [API capability negotiation and structured errors](docs/API_CONTRACT.md) before building automation. Existing `error` strings remain compatible; `error_detail` supplies stable codes and recovery guidance.

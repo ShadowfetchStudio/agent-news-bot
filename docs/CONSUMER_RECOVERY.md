@@ -78,6 +78,8 @@ python examples/reliable_consumer.py \
 
 The example's complete side effect is an atomic inbox transaction keyed by `(consumer, seq)`. A crash after commit and before acknowledgement safely replays the same keys. An inbox write error prevents acknowledgement. A reused sequence with different content stops processing rather than overwriting evidence. Use a separate inbox when connecting to a different or replaced server journal.
 
-`--start history` is the default for a new name; `--start now` only affects creation. Existing names are never automatically reset. Administrative conflicts stop the example. If a lease-acquisition response is lost, a retry may report 409; inspect status and wait for its short lease to expire rather than forcing a reset. This is safe but not transparent recovery of a lost lease token.
+`--start history` is the default for a new name; `--start now` only affects creation. Existing names are never automatically reset. Administrative conflicts stop the example. If a lease-acquisition response is lost, the example stops instead of automatically retrying administration. Inspect status and wait for the short lease to expire rather than forcing a reset. This is safe but not transparent recovery of a lost lease token.
 
 For real publishing or remote work, replace the SQLite sink only with an operation that accepts an idempotency key or a durable transactional outbox. A successful HTTP send followed by a crash can otherwise duplicate an external action. Acknowledgement is not proof of editorial or licensing approval.
+
+The example now checks [capabilities and error-contract versions](API_CONTRACT.md) before creating/leasing a consumer, disables proxy inheritance, and validates ordered page/acknowledgement boundaries before committing. Only reads and generation-bound acknowledgements are automatically retried; administrative calls stop on ambiguous failures.

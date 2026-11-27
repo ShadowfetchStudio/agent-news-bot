@@ -110,7 +110,12 @@ final class AgentBridge: @unchecked Sendable {
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        guard clientSlots.wait(timeout: .now()) == .success else { close(client); return }
+        guard clientSlots.wait(timeout: .now()) == .success else {
+            var shortWrite = timeval(tv_sec: 0, tv_usec: 100_000)
+            setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &shortWrite, socklen_t(MemoryLayout<timeval>.size))
+            writeResponse(client, status: 503, body: json(503, ["error": "connection capacity reached"]).1)
+            close(client); return
+        }
         let slots = clientSlots
         queue.async { [weak self] in
             defer { close(client); slots.signal() }
@@ -162,6 +167,10 @@ final class AgentBridge: @unchecked Sendable {
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
+        } else if let methods = APIContract.allowedMethods(path), !methods.contains(method) {
+            response = json(405, ["error": "method not allowed"])
+        } else if path == "/v1/capabilities" {
+            response = queryItems.isEmpty ? json(200, APIContract.capabilities()) : json(400, ["error": "capabilities does not accept query parameters"])
         } else if path == "/v1/library" || path.hasPrefix("/v1/library/") || path == "/v1/consumers" {
             var body: [String: Any] = [:]
             if method == "POST" {
@@ -305,7 +314,7 @@ final class AgentBridge: @unchecked Sendable {
         } else {
             response = json(404, ["error": "not found"])
         }
-        writeResponse(client, status: response.0, body: response.1)
+        writeResponse(client, status: response.0, body: response.1, headOnly: method == "HEAD")
     }
 
     private func consumerResponse(method: String, body: [String: Any]) -> (Int, Data) {
@@ -378,11 +387,16 @@ final class AgentBridge: @unchecked Sendable {
         return (status, data)
     }
 
-    private func writeResponse(_ client: Int32, status: Int, body: Data) {
+    private func writeResponse(_ client: Int32, status: Int, body: Data, headOnly: Bool = false) {
         // Reject oversized responses before writing them to a client.
         if body.count > 16 * 1024 * 1024 {
-            writeResponse(client, status: 413, body: Data("{\"error\":\"response too large; reduce limit\"}".utf8))
+            writeResponse(client, status: 413, body: Data("{\"error\":\"response too large; reduce limit\"}".utf8), headOnly: headOnly)
             return
+        }
+        var body = body
+        if status >= 400 {
+            let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? ["error": "Request failed"]
+            if let normalized = try? JSONSerialization.data(withJSONObject: APIContract.errorPayload(status, payload), options: [.sortedKeys]) { body = normalized }
         }
         let reason: String
         switch status {
@@ -400,9 +414,10 @@ final class AgentBridge: @unchecked Sendable {
         var header = "HTTP/1.1 \(status) \(reason)\r\n"
         header += "Content-Type: application/json\r\n"
         header += "Content-Length: \(body.count)\r\n"
+        if status == 503 { header += "Retry-After: 1\r\n" }
         header += "Connection: close\r\n\r\n"
         var payload = Data(header.utf8)
-        payload.append(body)
+        if !headOnly { payload.append(body) }
         payload.withUnsafeBytes { raw in
             guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
             var sent = 0

@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import FETCH_INTERVAL, HOME, LOOKBACK_HOURS, PORT, SHARED, MAX_PER_DESK, ALL_DESKS
 from . import coverage
+from .api_contract import capabilities, error_payload, allowed_methods, APP_VERSION
 from .engine import fetch_all
 from .store import FreshnessStore
 from .stories import StoryStore
@@ -250,25 +251,37 @@ STATE = NewsState()
 
 
 class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
-    server_version = "AgentNewsBot/1.0"
+    server_version = "AgentNewsBot/" + APP_VERSION
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
         log.info("%s - " + fmt, self.address_string(), *args)
 
     def _send(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, indent=2).encode()
+        body = json.dumps(error_payload(status, payload), indent=2).encode()
         if len(body) > 16 * 1024 * 1024:
             status = 413
-            body = b'{"error":"response too large; reduce limit"}'
+            body = json.dumps(error_payload(413, {"error": "response too large; reduce limit"})).encode()
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD": self.wfile.write(body)
         except OSError:
             pass
+
+    def send_error(self, code, message=None, explain=None):
+        # BaseHTTPRequestHandler parser/unsupported-method failures must also be JSON.
+        self._send(code, {"error": "HTTP request rejected"})
+
+    def _unsupported_method(self):
+        path = urlparse(self.path).path
+        if path != "/health" and not self._authorized():
+            self._send(401, {"error": "bearer token required"}); return
+        self._send(405 if allowed_methods(path) else 404, {"error": "method not allowed" if allowed_methods(path) else "not found"})
+
+    do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = do_TRACE = _unsupported_method
 
     def _authorized(self) -> bool:
         auth = self.headers.get("Authorization", "")
@@ -328,6 +341,13 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
             return
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
+            return
+        methods = allowed_methods(path)
+        if methods and "GET" not in methods:
+            self._send(405, {"error": "method not allowed"}); return
+        if path == "/v1/capabilities":
+            if parsed.query: self._send(400, {"error": "capabilities does not accept query parameters"})
+            else: self._send(200, capabilities())
             return
         if path == "/v1/library" or path.startswith("/v1/library/") or path == "/v1/consumers":
             self._library("GET", parsed); return
@@ -421,9 +441,14 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self._send(405, {"error": "method not allowed"}); return
         if not self._authorized():
             self._send(401, {"error": "bearer token required"})
             return
+        methods = allowed_methods(parsed.path)
+        if methods and "POST" not in methods:
+            self._send(405, {"error": "method not allowed"}); return
         if parsed.path == "/v1/library" or parsed.path.startswith("/v1/library/") or parsed.path == "/v1/consumers":
             self._library("POST", parsed); return
         if parsed.path == "/v1/events/ack":

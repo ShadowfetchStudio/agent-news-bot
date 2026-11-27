@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -1833,3 +1833,80 @@ def test_group_repair_snapshot_failure_is_observable_and_retryable(tmp_path, mon
     assert state.stories.pending("reader")["events"] == events
     assert state.latest_path.stat().st_mode & 0o777 == 0o600
     assert not list(state.latest_path.parent.glob(".repair-snapshot-*"))
+
+
+@pytest.mark.parametrize('runtime', ['python','swift'])
+def test_versioned_capabilities_and_error_contract(runtime,request,tmp_path,monkeypatch):
+    from agent_newsbot.api_contract import capabilities
+    with contextlib.ExitStack() as stack:
+        if runtime=='swift':
+            base,_=stack.enter_context(native_bridge(request.getfixturevalue('swift_harness'),tmp_path/'stories.sqlite'))
+            token='integration-test-token'
+        else:
+            monkeypatch.setattr(server,'HOME',tmp_path);monkeypatch.setattr(server,'SHARED',tmp_path/'shared')
+            state=server.NewsState();monkeypatch.setattr(server,'STATE',state)
+            httpd=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+            thread=threading.Thread(target=httpd.serve_forever,daemon=True);thread.start()
+            def stop():httpd.shutdown();httpd.server_close();thread.join()
+            stack.callback(stop);base=f'http://127.0.0.1:{httpd.server_port}';token=state.token
+        headers={'Authorization':'Bearer '+token}
+        expected=capabilities();expected['implementation']=runtime
+        response=requests.get(base+'/v1/capabilities',headers=headers,timeout=5)
+        assert response.status_code==200 and response.json()==expected
+        assert requests.get(base+'/v1/capabilities',headers={'X-Agent-Token':token},timeout=5).json()==expected
+        # The endpoint is declarative, not proof of configured source/model readiness.
+        assert expected['limitations']['automatic_publishing'] is False
+        cases=[('GET','/v1/capabilities',{},None,401,'unauthorized'),
+               ('GET','/v1/capabilities?unknown=1',headers,None,400,'invalid_request'),
+               ('POST','/v1/capabilities',headers,{},405,'method_not_allowed'),
+               ('POST','/v1/fresh',headers,{},405,'method_not_allowed'),
+               ('GET','/v1/fetch',headers,None,405,'method_not_allowed'),
+               ('GET','/v1/missing',headers,None,404,'not_found'),
+               ('POST','/v1/library/editorial?id=missing',headers,{},404,'not_found'),
+               ('DELETE','/v1/capabilities',headers,None,405,'method_not_allowed')]
+        for method,path,h,body,status,code in cases:
+            r=requests.request(method,base+path,headers=h,json=body,timeout=5)
+            assert r.status_code==status,r.text
+            result=r.json()
+            assert isinstance(result['error'],str)
+            detail=result['error_detail']
+            assert detail==dict(schema_version=1,code=code,http_status=status,
+                               recovery=expected['errors'][str(status)]['recovery'],automatic_retry_safe=False)
+        malformed=requests.post(base+'/v1/consumers',headers=headers,data=b'not json',timeout=5)
+        assert malformed.status_code==400 and malformed.json()['error_detail']['code']=='invalid_request'
+        assert requests.get(base+'/health',timeout=5).status_code==200
+        assert requests.post(base+'/health',timeout=5).status_code==405
+        # Check method declarations on each concrete route; no valid mutation is executed here.
+        for route,methods in expected['routes'].items():
+            if '{id}' in route: route=route.replace('{id}','nonexistent')
+            wrong='POST' if methods==['GET'] else 'GET' if methods==['POST'] else 'DELETE'
+            r=requests.request(wrong,base+route,headers=headers,json={} if wrong=='POST' else None,timeout=5)
+            assert r.status_code==405,(route,r.status_code,r.text)
+
+        # Real reference consumer negotiates before creating/leasing, commits then acknowledges.
+        journal=StoryStore(tmp_path/'stories.sqlite'); journal.ingest([article()])
+        tokenfile=tmp_path/'consumer.token';tokenfile.write_text(token);tokenfile.chmod(0o600)
+        inbox=tmp_path/'inbox.sqlite'
+        command=[sys.executable,str(ROOT/'examples/reliable_consumer.py'),'--base',base,'--token-file',str(tokenfile),'--consumer','contract-inbox','--inbox',str(inbox)]
+        for expected_count in (1,0):
+            run=subprocess.run(command,cwd=tmp_path,capture_output=True,text=True,timeout=20)
+            assert run.returncode==0,run.stderr
+            assert json.loads(run.stdout)['committed']==expected_count
+        import sqlite3
+        with sqlite3.connect(inbox) as db: assert db.execute('SELECT count(*) FROM inbox').fetchone()[0]==1
+        create={'consumer':'conflict-test','action':'create','start':'now'}
+        assert requests.post(base+'/v1/consumers',headers=headers,json=create,timeout=5).status_code==200
+        conflict=requests.post(base+'/v1/consumers',headers=headers,json=create,timeout=5)
+        assert conflict.status_code==409 and conflict.json()['error_detail']['code']=='conflict'
+        # A genuine broken journal produces an actionable storage error, not a traceback.
+        (tmp_path/'stories.sqlite').write_bytes(b'broken database')
+        failed=requests.get(base+'/v1/library',headers=headers,timeout=5)
+        assert failed.status_code==503,failed.text
+        assert failed.json()['error_detail']['recovery']=='inspect_state_then_backoff'
+
+
+def test_capability_app_version_matches_packaged_versions():
+    import re
+    from agent_newsbot.api_contract import APP_VERSION
+    assert APP_VERSION == re.search(r'^version = "([^"]+)"', (ROOT/'linux/pyproject.toml').read_text(), re.M)[1]
+    assert APP_VERSION == re.search(r'CFBundleShortVersionString</key><string>([^<]+)', (ROOT/'build.sh').read_text())[1]

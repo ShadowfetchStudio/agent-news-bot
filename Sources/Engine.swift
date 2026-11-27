@@ -505,15 +505,18 @@ final class NewsEngine: ObservableObject {
 
         ## Calls
         - `GET /health`
+        - `GET /v1/capabilities` — authenticate, check API/contract/feature versions before automation
         - `GET /v1/fresh?desk=<desk>&limit=<n>` — repeatable current snapshot
         - `GET /v1/events?consumer=<name>` — persistent ordered revisions
-        - `POST /v1/events/ack?consumer=<name>&through=<next_cursor>` — acknowledge processed events only
+        - `POST /v1/events/ack?consumer=<name>&through=<next_cursor>&generation=<generation>` — acknowledge processed events only
         - `GET /v1/articles/<id>` — single article in the fresh batch
         - `GET /v1/stories/<id>` — current durable story and provider context
         - `GET /v1/stories/<id>/revisions` — recorded revisions and differences
         - `GET /v1/desks` — per-desk counts and source errors
         - `GET /v1/status` — snapshot status
         - `POST /v1/fetch` — request refresh (202 accepted, 409 already running); poll /v1/status fetch_job for completion
+
+        Errors preserve `error` and add versioned `error_detail` codes/recovery guidance. Do not blindly retry writes after ambiguous failures. Reload consumer/editorial state on 409. Repair retries require the same operation ID and identical request. Use `GET /v1/consumers` for generation/lag/lease status; active leases require X-Consumer-Lease. Commit every delivered event before acknowledging. Capabilities describe support, not source/agent readiness; inspect coverage separately. Empty output does not prove coverage is current. No request automatically authorizes publication or clears media rights.
 
         Do not invent URLs. Prefer the tweet and hashtags fields when drafting social posts. Never print the bearer token in public channels.
         """

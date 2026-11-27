@@ -51,7 +51,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 
 - [x] Durable story lookup, revision differences, source/provider filters.
 - [x] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases (API and Linux CLI).
-- [ ] Reference idempotent retrying consumer and versioned capabilities/errors.
+- [x] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [ ] Feed coverage/last-success/backoff, verified replacement sources.
 - [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
@@ -206,3 +206,15 @@ The manual repair portion of R03 remains open. Source backoff/circuit breakers, 
 - The walkthrough identified two UI refinements: clear library selections no longer present after filtering/repair, and open on All stories when a restored selected desk is disabled. Retired draft fields and editorial-state controls are disabled; the reason field has an explicit accessibility label. Final build passed without warnings and strict ad-hoc signature verification passed. Scoped UI recheck showed the restored story in the main list and both story actions disabled after filtering away the selected row; evidence is in `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-group-ui-coluguh_/verification.json`. Test app/preferences were cleaned up.
 
 This closes R03 and the manual grouping checkbox, not the broader release objective. First-run experience, ranked briefs, capabilities/errors, source resilience/replacements, backup/restore/retention/load, full keyboard/VoiceOver and optional real integrations, final icons/packages/docs/release upload remain tracked above.
+
+## API discovery and reliable-client batch
+
+- Added authenticated capability discovery with API/contract/error-schema and feature versions, canonical routes/methods, limits, authentication/delivery requirements, and explicit limits on publishing/dashboard/fact-check/rights capabilities. This is implemented-support discovery, not a claim of live source/model readiness.
+- Both final response writers preserve legacy `error` strings and add matching versioned codes, HTTP status and recovery guidance. Malformed JSON, wrong methods, auth failures, conflicts, storage failure, response-size rejection and connection overload share the envelope. Python parser errors are JSON too; HEAD sends no response body. Dead socket/header failures can still close without a response and remain unknown outcomes.
+- Reference consumer negotiates before creating/leasing, disables environment proxies, retries only reads and generation-bound acknowledgements, and rejects malformed/incomplete/out-of-order pages before committing or acknowledging. Ambiguous administration stops for reconciliation. Real Swift/Python HTTP tests run it twice and verify a single private inbox record with no duplicate delivery effects.
+- Updated shipped/generated agent descriptors to include capability/error/generation handling, and removed stale claims that empty output proves current coverage. Existing installed custom descriptors remain preserved.
+- Full Mac suite: **230 passed**. Native Pop!_OS suite: **131 passed / 99 Mac-only skips**. An initial Linux copy lacked `build.sh` needed by the new packaged-version consistency fixture; copying the missing test input resolved the failure and the full suite passed.
+- Apple Silicon build completed without compiler warnings and passed strict ad-hoc signature validation. An isolated run of the actual built app returned authenticated capabilities, structured 405 errors and bodyless HEAD responses. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-group-ui-3uw2igdd/contract-verification.json`. The fixture app was stopped and its private test preferences removed.
+- A Linux development wheel was built and installed into `/tmp/anb-contract-installed`; from outside the checkout, its packaged capability module and server imported with the expected app version. This is package inclusion evidence, not the final public release artifact.
+
+First-run setup, source resilience, maintenance/retention/load, deeper editorial work, remaining accessibility/real integrations and final release deliverables remain open in the checklist.

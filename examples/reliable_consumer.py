@@ -22,21 +22,25 @@ class Client:
         if url.scheme not in ('http','https') or url.hostname not in ('localhost','127.0.0.1','::1') or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
             raise ValueError('base URL must be the localhost bridge origin')
         self.base=base.rstrip('/'); self.session=session or requests.Session()
+        self.session.trust_env = False  # Do not send the local bearer token through an environment proxy.
         self.session.headers.update({'Authorization':'Bearer '+token})
         self.lease=None
 
     def call(self, method, path, **kwargs):
-        for attempt in range(5):
+        # GET and generation-bound acknowledgement are replay-safe. A lost admin
+        # response needs reconciliation; retrying lease/create/reset may change ownership.
+        attempts = 5 if method == 'GET' or (method == 'POST' and path == '/v1/events/ack') else 1
+        for attempt in range(attempts):
             try:
                 headers={'X-Consumer-Lease':self.lease} if self.lease else {}
                 response=self.session.request(method,self.base+path,headers=headers,timeout=(3,8),allow_redirects=False,**kwargs)
-                if response.status_code in (429,502,503,504) and attempt<4:
+                if response.status_code in (429,502,503,504) and attempt<attempts-1:
                     time.sleep(min(8,.5*2**attempt)); continue
                 if response.status_code!=200:
                     raise RuntimeError(f'Bridge returned HTTP {response.status_code}; inspect status before retrying this operation')
                 return response.json()
             except (requests.Timeout, requests.ConnectionError):
-                if attempt==4: raise
+                if attempt==attempts-1: raise
                 time.sleep(min(8,.5*2**attempt))
         raise RuntimeError('retry limit reached')
 
@@ -59,8 +63,35 @@ def commit_batch(path, consumer, events):
     finally: os.umask(old)
 
 
+def check_capabilities(client):
+    value = client.call('GET', '/v1/capabilities')
+    required = ('consumer_delivery', 'consumer_generations', 'consumer_leases')
+    if not isinstance(value, dict) or any(type(value.get(key)) is not int or value[key] != 1 for key in ('api_version', 'contract_version', 'error_schema_version')):
+        raise RuntimeError('Unsupported bridge contract; update the client before consuming')
+    features = value.get('features', {})
+    if not isinstance(features, dict) or any(type(features.get(k)) is not int or features[k] != 1 for k in required):
+        raise RuntimeError('Bridge lacks compatible delivery, generation or lease capabilities')
+    return value
+
+
+def validate_page(page, limit):
+    if not isinstance(page, dict): raise RuntimeError('Invalid event page')
+    for key in ('cursor', 'next_cursor', 'generation', 'count'):
+        if type(page.get(key)) is not int or page[key] < 0: raise RuntimeError('Invalid event page counters')
+    events = page.get('events')
+    if not isinstance(events, list) or page['count'] != len(events) or len(events) > limit:
+        raise RuntimeError('Invalid event page length')
+    previous = page['cursor']
+    for event in events:
+        if not isinstance(event, dict) or type(event.get('seq')) is not int or event['seq'] <= previous or not isinstance(event.get('story'), dict):
+            raise RuntimeError('Invalid event sequence or payload')
+        previous = event['seq']
+    if previous != page['next_cursor']: raise RuntimeError('Event page does not cover its acknowledgement boundary')
+
+
 def run_batch(client, consumer, inbox, limit=100):
     page=client.call('GET','/v1/events',params={'consumer':consumer,'limit':limit})
+    validate_page(page,limit)
     commit_batch(inbox,consumer,page['events'])
     # A crash before this request leaves unacknowledged rows; replay hits the same SQLite keys.
     client.call('POST','/v1/events/ack',params={'consumer':consumer,'through':page['next_cursor'],'generation':page['generation']})
@@ -81,6 +112,7 @@ def main():
     token=token_path.read_text().strip()
     if not token: raise ValueError('empty token file')
     client=Client(args.base,token)
+    check_capabilities(client)
     rows=client.call('GET','/v1/consumers')['consumers']
     current=next((r for r in rows if r['consumer']==args.consumer),None)
     if current is None:
@@ -108,5 +140,6 @@ if __name__=='__main__':
     except Exception as exc:
         import sys
         # Avoid printing requests exceptions containing request credentials or response bodies.
-        print(f'Consumer stopped: {type(exc).__name__}. Check bridge status and consumer generation.',file=sys.stderr)
+        detail = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        print(f'Consumer stopped: {detail}. Check bridge status and consumer generation.',file=sys.stderr)
         sys.exit(1)
