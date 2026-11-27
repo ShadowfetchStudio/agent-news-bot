@@ -1,0 +1,76 @@
+{
+  "source_commit": "86785a1628537ea7224878368b6c7c987529a92c",
+  "ci": "https://github.com/ShadowfetchStudio/agent-news-bot/actions/runs/46051062319",
+  "tests": {
+    "mac_passed": 439,
+    "linux_passed": 270,
+    "linux_mac_only_skipped": 169
+  },
+  "archives": {
+    "linux": {
+      "members": 222,
+      "no_links_or_traversal": true,
+      "no_private_runtime_files": true
+    },
+    "mac": {
+      "members": 60,
+      "metadata_license_icon_helpers_present": true
+    }
+  },
+  "download_verification": {
+    "checked_at": "2026-11-27T18:44:54.504057+00:00",
+    "release": "https://github.com/ShadowfetchStudio/agent-news-bot/releases/tag/v1.2.0",
+    "all_downloads_identical": true,
+    "assets": {
+      "AgentNewsBot-1.2.0-linux-source-installer.tar.gz": {
+        "bytes": 1172857,
+        "sha256": "0b77b6e4b1da8ab952f080593a1cc10b9356a22d39863083ba42056a86cfcdd9"
+      },
+      "AgentNewsBot-1.2.0-macos-arm64-ad-hoc.zip": {
+        "bytes": 2149648,
+        "sha256": "615545a78786b960c7d5b122e414413fb8231449ae3572960f396faeb41319ad"
+      },
+      "AgentNewsBot-icon.png": {
+        "bytes": 665703,
+        "sha256": "a2b083c49349e0fd3c4322dbace3ec886154701765f7c7fbc0bfba7d1ec3bd63"
+      },
+      "RELEASE-INFO.json": {
+        "bytes": 362,
+        "sha256": "12541696211f4ae935c57865946f802a5cd1e18586b40a3b42c8c19b9d90d884"
+      },
+      "SHA256SUMS": {
+        "bytes": 395,
+        "sha256": "8fe092947c8d6e1817dcf6c9d8334a820dae09f892f122f73937a0410033ccc4"
+      }
+    }
+  },
+  "native_linux": {
+    "first_install": true,
+    "upgrade": true,
+    "config_preserved": true,
+    "consumer_preserved": true,
+    "installed_icon_sha256": "5d9c26606a009eb495e0fdd47a1b9e5c50effa8371e933fcb5a4fdcf3751d22c",
+    "installed_operations": true,
+    "private_journal": true,
+    "explicit_rollback": true,
+    "rollback": true,
+    "restored_service_healthy": true,
+    "test_service_removed": true
+  },
+  "native_mac": {
+    "operations_complete": true,
+    "private_token": true,
+    "private_journal": true,
+    "build_info": {
+      "source_commit": "86785a1628537ea7224878368b6c7c987529a92c",
+      "source_dirty": false,
+      "architecture": "arm64",
+      "built_at": "2026-11-27T18:41:43.012518+00:00",
+      "signing": "ad-hoc",
+      "notarized": false
+    },
+    "first_run_ui_verified": true,
+    "isolated_process_stopped": true,
+    "isolated_preferences_removed": true
+  }
+}

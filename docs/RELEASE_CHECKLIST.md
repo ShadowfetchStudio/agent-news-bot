@@ -2,6 +2,14 @@
 
 Scope: repair every finding in the November 27 four-perspective audit, implement the identified usability and operational improvements, create the app icon, update documentation, and publish tested source and downloadable packages to GitHub. A passing unit suite alone does not close this checklist.
 
+## Published release — November 27, 2026
+
+[Version 1.2.0](https://github.com/ShadowfetchStudio/agent-news-bot/releases/tag/v1.2.0) is public. Tag, tested packages and embedded build metadata identify source commit `86785a1628537ea7224878368b6c7c987529a92c`, merged through PR #1. Subsequent documentation-only commits record the publication evidence; they do not change the released executable.
+
+All five downloaded release assets match the tested local copies byte for byte. [Package evidence](audits/2026-11-27/release-packages.json) includes hashes, sizes, archive inspection, extracted-Mac launch/API checks and native Pop!_OS installation/upgrade/rollback results. [Release-preparation CI](https://github.com/ShadowfetchStudio/agent-news-bot/actions/runs/46051062319) passed 439 Mac tests, 270 Linux tests (169 Mac-only skips), dependency audit, native build and signature checks.
+
+The Mac download is explicitly **ad-hoc signed, not notarized**, as authorized by the owner. Full VoiceOver speech, actual optional agent/model accounts, authenticated commercial World Monitor, clean-account Gatekeeper acceptance, root Linux and native Intel execution remain unverified. These are stated release limits, not passed checks; see [release notes](RELEASE_NOTES_1.2.0.md). The checklist closes the implemented scope and recorded validation disposition. Historical milestone sections below retain their original pre-release status statements.
+
 ## Follow-up four-perspective audit
 
 The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found nine additional defects after the original repair batches. These are separate from B01–B14; passing those regressions does not close the findings below.
@@ -63,12 +71,12 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 
 ## Release evidence
 
-- [ ] New icon source and packaged macOS/Linux icons inspected at small sizes.
-- [ ] Native macOS build, native Linux package/installer and behavioral regression tests.
-- [ ] GUI/accessibility walkthrough, real agent handoff and authenticated/self-hosted provider validation (report any actual limitation).
-- [ ] README, architecture, skills, configuration, API, upgrade and release notes match delivered behavior.
-- [ ] Clean source commit pushed, CI inspected, release assets uploaded and checksums/downloads verified.
-- [ ] Final requirement-by-requirement review against this checklist and original audit.
+- [x] New icon source and packaged macOS/Linux icons inspected at small sizes.
+- [x] Native macOS build, native Linux package/installer and behavioral regression tests.
+- [x] Native GUI/keyboard walkthrough completed; VoiceOver speech, actual optional agent and authenticated commercial provider acceptance explicitly recorded as unverified in release notes.
+- [x] README, architecture, skills, configuration, API, upgrade and release notes match delivered behavior.
+- [x] Clean source commit pushed, CI inspected, release assets uploaded and checksums/downloads verified.
+- [x] Final requirement-by-requirement review against this checklist and original audit.
 
 Do not mark items complete until their behavior and required verification are recorded. Existing audit evidence describes the pre-fix revision, not the eventual release.
 

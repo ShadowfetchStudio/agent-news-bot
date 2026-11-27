@@ -3,10 +3,11 @@
 The historical four-perspective audits are preserved under `audits/2026-11-27/`.
 This map ties each numbered defect to tests of its repaired behavior. Test names
 below are in `tests/test_worldmonitor.py` unless a different file is specified.
-The verified operator commit is `75f03a7`; its CI is
-[run 46048012868](https://github.com/ShadowfetchStudio/agent-news-bot/actions/runs/46048012868).
-Release packaging changes add source provenance and distribution files; final
-package identity is recorded by the release's `RELEASE-INFO.json`.
+The verified release commit is `86785a1`; its CI is
+[run 46051062319](https://github.com/ShadowfetchStudio/agent-news-bot/actions/runs/46051062319).
+Final package identity is recorded by the release's `RELEASE-INFO.json`.
+[Publication evidence](audits/2026-11-27/release-packages.json) records the tested
+archives, native installation results and byte-identical re-downloads of all five assets.
 
 | Finding | Repaired behavior and regression evidence |
 |---|---|

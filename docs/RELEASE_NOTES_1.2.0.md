@@ -73,7 +73,7 @@ protected research, archives or exports to satisfy a hosted plan's retention ter
 
 ## Validation and limits
 
-The final operator-code CI passed **439 Mac tests** and **270 Linux tests with
+The release-preparation CI passed **439 Mac tests** and **270 Linux tests with
 169 Mac-specific skips**, plus the dependency audit and native build/signature
 checks. Actual Mac walkthroughs cover setup/diagnostics, corrected history,
 platform decisions, briefs, alerts, storage recovery, credential failure/reload and
@@ -102,3 +102,8 @@ Explicit limits:
   edits, WAL, caches and archives have the scope documented in [Operations](OPERATIONS.md).
 - Delivery is at least once. External publishing needs idempotency and independent
   authorization; this app does not provide exactly-once social publication.
+
+Publication verification: all five public release assets were downloaded again and
+matched the tested local files byte for byte. The release tag and embedded metadata
+identify `86785a1628537ea7224878368b6c7c987529a92c`. See
+[package evidence](audits/2026-11-27/release-packages.json).

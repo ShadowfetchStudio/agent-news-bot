@@ -23,4 +23,4 @@ Hermes API handoffs use a separate ephemeral session with a 120-second total res
 
 Hermes API probing requires a 2xx response; 401/403 are not readiness. Disabling CLI preference no longer presents an unavailable API as ready merely because a CLI exists. An OpenClaw gateway without the required CLI is shown as detected but not ready for the CLI-only send action. Agents can still pull from the local bridge. The port probe rejects out-of-range ports before converting them to UInt16 and synchronizes completion so timeout/state callbacks cannot resume twice.
 
-Real installed-agent/version compatibility and the final user-visible handoff walkthrough remain release checks. A mock response is not a real agent acceptance.
+For version 1.2.0, actual installed Hermes/OpenClaw model handoff remains unverified: those executables were absent on the checked hosts. Controlled protocol and failure tests passed; a mock response is not a real agent acceptance. See [release limits](RELEASE_NOTES_1.2.0.md).
