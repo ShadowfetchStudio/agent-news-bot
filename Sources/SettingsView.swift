@@ -6,6 +6,8 @@ struct SettingsView: View {
     @State private var hermesToken = ""
     @State private var openClawToken = ""
     @State private var worldMonitorKey = ""
+    @State private var originalCredentials: [String: String] = [:]
+    @State private var credentialMessage = ""
 
     var body: some View {
         Form {
@@ -59,9 +61,17 @@ struct SettingsView: View {
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
-                Text("Loopback only. Hermes skill is installed to ~/.hermes/skills/agent-news-bot.")
+                Button("Install agent skills") { engine.installAgentSkills() }
+                Text("Loopback only. Install skills for Hermes and other agents explicitly. Existing skill files are preserved.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Credentials") {
+                Button("Save credential changes") { saveCredentials() }
+                Text("Credentials are saved only with this button. Clearing a loaded field removes that credential. Closing Settings does not change saved credentials.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !credentialMessage.isEmpty { Text(credentialMessage).textSelection(.enabled) }
+                if !settings.credentialError.isEmpty { Text(settings.credentialError).foregroundStyle(.red) }
             }
             Section("Desks") {
                 ForEach(Desk.allCases) { desk in
@@ -76,16 +86,36 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            worldMonitorKey = settings.worldMonitorKey
-            hermesToken = settings.hermesToken
-            openClawToken = settings.openClawToken
+            originalCredentials = [:]
+            settings.credentialError = ""
+            for account in ["worldmonitor", "hermes-api", "openclaw"] {
+                do { originalCredentials[account] = try Keychain.get(account) ?? "" }
+                catch { settings.credentialError += "\(account): \(error.localizedDescription)\n" }
+            }
+            worldMonitorKey = originalCredentials["worldmonitor"] ?? ""
+            hermesToken = originalCredentials["hermes-api"] ?? ""
+            openClawToken = originalCredentials["openclaw"] ?? ""
         }
         .onDisappear {
-            settings.worldMonitorKey = worldMonitorKey
-            settings.hermesToken = hermesToken
-            settings.openClawToken = openClawToken
             settings.save()
-            engine.bridge.start(port: settings.bridgePort, token: engine.bridgeToken)
+            engine.applyBridgeSettings()
         }
     }
+    private func saveCredentials() {
+        var messages: [String] = []
+        for (account, value) in [("worldmonitor", worldMonitorKey), ("hermes-api", hermesToken), ("openclaw", openClawToken)] {
+            guard let original = originalCredentials[account] else {
+                messages.append("\(account): unchanged because the existing credential could not be read.")
+                continue
+            }
+            guard value != original else { continue }
+            do {
+                try Keychain.set(value, account: account)
+                originalCredentials[account] = value
+                messages.append("\(account): saved.")
+            } catch { messages.append("\(account): \(error.localizedDescription). Previous credential preserved if update failed.") }
+        }
+        credentialMessage = messages.isEmpty ? "No credential changes." : messages.joined(separator: "\n")
+    }
+
 }

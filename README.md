@@ -1,5 +1,7 @@
 # Agent News Bot
 
+<img src="Resources/AppIcon-1024.png" alt="Agent News Bot globe and newspaper icon" width="128" height="128">
+
 A local-first **news desk for AI agents**. Agent News Bot scans 14 topic "desks" from public,
 key-free sources, groups related stories while preserving their sources, tracks new and changed reports, generates
 a ready-to-post tweet and hashtags for each item, and serves the fresh batch over a small
@@ -175,7 +177,15 @@ without a valid token or `405` on disallowed HTTP methods.
 | `POST /v1/events/ack?consumer=<name>&through=<seq>` | yes | Acknowledge a delivered prefix; cannot advance past events offered to that consumer. |
 | `GET /v1/desks` | yes | Per-desk counts: fresh, skipped-old, skipped-dup, and source errors. |
 | `GET /v1/status` | yes | Snapshot summary: total fresh, `fetched_at`, whether a fetch is in flight. |
-| `POST /v1/fetch` | yes | Force an immediate refresh; returns the new total. |
+| `POST /v1/fetch` | yes | Start a refresh: `202` with a job ID and `/v1/status` polling URL; `409` if already running. Poll until `fetch_job.state` is `completed` or `failed`. |
+
+A successful refresh request is **accepted**, not completed. Read `fetch_job.id` from the
+202 response, then poll `/v1/status`. Its `fetch_job` includes `state` (`running`,
+`completed`, `failed`), start/end times and a final `total_articles` only on success.
+Check that the ID matches your request; another client may start a later job.
+A 409 response means work is already running; it does not return a completed snapshot.
+`desks[].fresh` counts changes this cycle; Linux also reports `new`, `updated`,
+`carried` and `displayed` so retained articles are not mislabeled as new.
 
 **Example (Linux service, token read from its export file):**
 
@@ -342,3 +352,15 @@ Like this project? You can [buy me a coffee](https://www.buymeacoffee.com/shadow
 **MIT** (see [LICENSE](LICENSE)). The project uses only system frameworks on macOS and
 permissively-licensed Python dependencies (`feedparser`, `requests`), so there is no copyleft
 obligation. The World Monitor connector is independently implemented against its REST contract and embeds no World Monitor platform code. Source-code licensing does not grant rights to upstream news or hosted-service outputs; each provider's terms govern that use.
+
+### Credential and skill safety
+
+On macOS, use **Settings → Credentials → Save credential changes** explicitly. Closing
+Settings saves ordinary preferences but does not alter secrets. Failed Keychain reads
+prevent replacement of the affected credential; failed updates retain the old value.
+Agent skill installation is explicit and never overwrites an existing `SKILL.md`.
+
+The Linux installer defaults the CLI to the service's state directory. Run service
+operations as the service account, for example `sudo -u agentnewsbot agent-newsbot status`,
+using the configured service username if it differs. For a separate user instance, set
+`AGENT_NEWSBOT_HOME` explicitly. Do not make the service token world-readable.

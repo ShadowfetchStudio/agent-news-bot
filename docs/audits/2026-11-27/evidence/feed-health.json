@@ -1,0 +1,370 @@
+[
+  {
+    "source": "NPR",
+    "url": "https://feeds.npr.org/1001/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml",
+    "http": 200,
+    "entries": 31,
+    "truncated": false
+  },
+  {
+    "source": "NY Times",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+    "http": 200,
+    "entries": 15,
+    "truncated": false
+  },
+  {
+    "source": "AP",
+    "url": "https://feeds.apnews.com/rss/apf-topnews",
+    "error": "ConnectionError"
+  },
+  {
+    "source": "NPR Politics",
+    "url": "https://feeds.npr.org/1014/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC Politics",
+    "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+    "http": 200,
+    "entries": 61,
+    "truncated": false
+  },
+  {
+    "source": "NY Times",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "Politico",
+    "url": "https://rss.politico.com/politics-news.xml",
+    "http": 200,
+    "entries": 30,
+    "truncated": false
+  },
+  {
+    "source": "The Hill",
+    "url": "https://thehill.com/feed/",
+    "http": 200,
+    "entries": 100,
+    "truncated": false
+  },
+  {
+    "source": "BBC World",
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "http": 200,
+    "entries": 31,
+    "truncated": false
+  },
+  {
+    "source": "NPR World",
+    "url": "https://feeds.npr.org/1004/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "NY Times World",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "http": 200,
+    "entries": 60,
+    "truncated": false
+  },
+  {
+    "source": "Al Jazeera",
+    "url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "http": 200,
+    "entries": 25,
+    "truncated": false
+  },
+  {
+    "source": "Deutsche Welle",
+    "url": "https://rss.dw.com/rdf/rss-en-all",
+    "http": 200,
+    "entries": 144,
+    "truncated": false
+  },
+  {
+    "source": "AP World",
+    "url": "https://feeds.apnews.com/rss/apf-intlnews",
+    "error": "ConnectionError"
+  },
+  {
+    "source": "NPR Business",
+    "url": "https://feeds.npr.org/1006/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC Business",
+    "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "http": 200,
+    "entries": 53,
+    "truncated": false
+  },
+  {
+    "source": "CNBC",
+    "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+    "http": 200,
+    "entries": 30,
+    "truncated": false
+  },
+  {
+    "source": "Yahoo Finance",
+    "url": "https://finance.yahoo.com/news/rssindex",
+    "http": 404
+  },
+  {
+    "source": "MarketWatch",
+    "url": "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "Ars Technica",
+    "url": "https://feeds.arstechnica.com/arstechnica/index",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "The Verge",
+    "url": "https://www.theverge.com/rss/index.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "TechCrunch",
+    "url": "https://feeds.feedburner.com/TechCrunch",
+    "http": 200,
+    "entries": 19,
+    "truncated": true
+  },
+  {
+    "source": "Wired",
+    "url": "https://www.wired.com/feed/rss",
+    "http": 200,
+    "entries": 50,
+    "truncated": false
+  },
+  {
+    "source": "BBC Technology",
+    "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
+    "http": 200,
+    "entries": 21,
+    "truncated": false
+  },
+  {
+    "source": "The Register",
+    "url": "https://www.theregister.com/headlines.atom",
+    "http": 200,
+    "entries": 50,
+    "truncated": false
+  },
+  {
+    "source": "TechCrunch AI",
+    "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "Verge AI",
+    "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "MIT Tech Review",
+    "url": "https://www.technologyreview.com/feed/",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "Simon Willison",
+    "url": "https://simonwillison.net/atom/everything/",
+    "http": 200,
+    "entries": 30,
+    "truncated": false
+  },
+  {
+    "source": "Hugging Face",
+    "url": "https://huggingface.co/blog/feed.xml",
+    "http": 200,
+    "entries": 918,
+    "truncated": false
+  },
+  {
+    "source": "Google AI",
+    "url": "https://blog.google/technology/ai/rss/",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "NVIDIA AI",
+    "url": "https://blogs.nvidia.com/blog/category/generative-ai/feed/",
+    "http": 200,
+    "entries": 18,
+    "truncated": false
+  },
+  {
+    "source": "VentureBeat AI",
+    "url": "https://venturebeat.com/category/ai/feed/",
+    "http": 429
+  },
+  {
+    "source": "arXiv cs.AI",
+    "url": "https://rss.arxiv.org/rss/cs.AI",
+    "http": 200,
+    "entries": 242,
+    "truncated": true
+  },
+  {
+    "source": "arXiv cs.LG",
+    "url": "https://rss.arxiv.org/rss/cs.LG",
+    "http": 200,
+    "entries": 0,
+    "truncated": false
+  },
+  {
+    "source": "Wired AI",
+    "url": "https://www.wired.com/feed/tag/ai/latest/rss",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "NPR Science",
+    "url": "https://feeds.npr.org/1007/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC Science",
+    "url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "http": 200,
+    "entries": 42,
+    "truncated": false
+  },
+  {
+    "source": "NY Times Science",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "ScienceDaily",
+    "url": "https://www.sciencedaily.com/rss/all.xml",
+    "http": 200,
+    "entries": 60,
+    "truncated": false
+  },
+  {
+    "source": "NASA",
+    "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "NPR Health",
+    "url": "https://feeds.npr.org/1128/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC Health",
+    "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+    "http": 200,
+    "entries": 57,
+    "truncated": false
+  },
+  {
+    "source": "NY Times Health",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",
+    "http": 200,
+    "entries": 20,
+    "truncated": false
+  },
+  {
+    "source": "Medical News Today",
+    "url": "https://www.medicalnewstoday.com/rss",
+    "http": 404
+  },
+  {
+    "source": "BBC Entertainment",
+    "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+    "http": 200,
+    "entries": 25,
+    "truncated": false
+  },
+  {
+    "source": "Variety",
+    "url": "https://variety.com/feed/",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "Deadline",
+    "url": "https://deadline.com/feed/",
+    "http": 200,
+    "entries": 12,
+    "truncated": false
+  },
+  {
+    "source": "Hollywood Reporter",
+    "url": "https://www.hollywoodreporter.com/feed/",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "NPR Sports",
+    "url": "https://feeds.npr.org/1055/rss.xml",
+    "http": 200,
+    "entries": 10,
+    "truncated": false
+  },
+  {
+    "source": "BBC Sport",
+    "url": "https://feeds.bbci.co.uk/sport/rss.xml",
+    "http": 200,
+    "entries": 65,
+    "truncated": false
+  },
+  {
+    "source": "ESPN",
+    "url": "https://www.espn.com/espn/rss/news",
+    "http": 200,
+    "entries": 35,
+    "truncated": false
+  },
+  {
+    "source": "Yahoo Sports",
+    "url": "https://sports.yahoo.com/rss/",
+    "http": 200,
+    "entries": 50,
+    "truncated": false
+  }
+]

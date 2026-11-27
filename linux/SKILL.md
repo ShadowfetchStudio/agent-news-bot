@@ -1,7 +1,7 @@
 ---
 name: agent-news-bot
 description: Pull new and updated news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Agent News Bot (Linux)

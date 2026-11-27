@@ -65,6 +65,7 @@ final class NewsEngine: ObservableObject {
     let stories = StoryStore(path: AppPaths.support.appendingPathComponent("stories.sqlite"))
 
     private let snapshot = LockedSnapshot()
+    private var completedFetches = 0
 
     var filtered: [Article] {
         var items = articles
@@ -92,16 +93,35 @@ final class NewsEngine: ObservableObject {
         bridge.desksProvider = { snap.readDesks() }
         bridge.statusProvider = { snap.readStatus() }
         bridge.fetchHandler = { [weak self] in
-            guard let self else { return 0 }
-            await self.fetchFresh()
-            return snap.readArticles().count
+            guard let self else { throw BridgeFetchFailure.unavailable }
+            return try await self.fetchForBridge()
         }
         bridgeReady = bridge.start(port: settings.bridgePort, token: bridgeToken)
         if !bridgeReady {
             status = "Bridge failed to bind on 127.0.0.1:\(settings.bridgePort) (port in use)."
         }
         Task { await refreshAgents() }
-        installHermesSkill()
+    }
+
+    enum BridgeFetchFailure: Error { case unavailable, busy, failed }
+
+    func applyBridgeSettings() {
+        let requested = settings.bridgePort
+        let applied = bridge.start(port: requested, token: bridgeToken)
+        bridgeReady = bridge.isListening
+        if !applied {
+            settings.bridgePort = Int(bridge.port)
+            settings.save()
+            status = "Cannot use port \(requested). " + (bridgeReady ? "Bridge remains on \(bridge.port)." : "Bridge is offline.")
+        }
+    }
+
+    private func fetchForBridge() async throws -> Int {
+        guard !isFetching else { throw BridgeFetchFailure.busy }
+        let previous = completedFetches
+        await fetchFresh()
+        guard completedFetches != previous else { throw BridgeFetchFailure.failed }
+        return snapshot.readArticles().count
     }
 
     func fetchFresh() async {
@@ -181,10 +201,15 @@ final class NewsEngine: ObservableObject {
         let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
         report = FetchReport(started: started, finished: finished, freshCount: merged.count, scanned: scanned, desks: results)
         exportJSON(fetchedAt: fetchedAtISO)
+        completedFetches += 1
         let errors = results.flatMap(\.sourceErrors).count
-        status = merged.isEmpty
-            ? "No fresh stories in the last \(Int(lookback))h. Desks are current."
-            : "\(merged.count) fresh stories · \(errors) source warnings"
+        if merged.isEmpty {
+            status = errors > 0
+                ? "No new stories returned · \(errors) source warnings. Full coverage could not be confirmed."
+                : "No new or updated stories in the last \(Int(lookback))h."
+        } else {
+            status = "\(merged.count) new or updated stories · \(errors) source warnings"
+        }
         isFetching = false
         snapshot.setFetching(false)
     }
@@ -281,13 +306,13 @@ final class NewsEngine: ObservableObject {
         return token
     }
 
-    private func installHermesSkill() {
+    func installAgentSkills() {
         let tokenPath = AppPaths.tokenFile.path
         let skill = """
         ---
         name: agent-news-bot
         description: Pull new and updated news from the local Agent News Bot desk (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-        version: 1.1.0
+        version: 1.2.0
         ---
 
         # Agent News Bot
@@ -309,14 +334,19 @@ final class NewsEngine: ObservableObject {
         - `GET /v1/articles/<id>` — single article lookup
         - `GET /v1/desks` — per-desk counts and source errors
         - `GET /v1/status` — snapshot status
-        - `POST /v1/fetch` — trigger immediate refresh
+        - `POST /v1/fetch` — request refresh (202 accepted, 409 already running); poll /v1/status fetch_job for completion
 
         Do not invent URLs. Prefer the tweet and hashtags fields when drafting social posts. Never print the bearer token in public channels.
         """
+        var installed = 0, preserved = 0, failed = 0
         for rel in [".hermes/skills/agent-news-bot", ".agents/skills/agent-news-bot"] {
             let dest = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(rel, isDirectory: true)
-            try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-            try? skill.write(to: dest.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+            let file = dest.appendingPathComponent("SKILL.md")
+            do {
+                if try SkillInstaller.install(skill, at: file) { installed += 1 }
+                else { preserved += 1 }
+            } catch { failed += 1 }
         }
+        status = "Agent skills: \(installed) installed, \(preserved) existing files preserved, \(failed) failed."
     }
 }

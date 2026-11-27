@@ -30,11 +30,15 @@ if [ ! -x "$PREFIX/.venv/bin/python" ]; then
 fi
 "$PREFIX/.venv/bin/pip" install --quiet --upgrade pip
 "$PREFIX/.venv/bin/pip" install --quiet -r "$HERE/requirements.txt"
+# Install the package itself, so the console works independently of cwd/PYTHONPATH.
+"$PREFIX/.venv/bin/pip" install --quiet --no-deps "$HERE"
 
 # CLI wrapper using the prefix venv when available
 cat > /usr/local/bin/agent-newsbot <<EOF
 #!/bin/sh
 export AGENT_NEWSBOT_PREFIX="\${AGENT_NEWSBOT_PREFIX:-${PREFIX}}"
+export AGENT_NEWSBOT_HOME="\${AGENT_NEWSBOT_HOME:-${STATE_DIR}}"
+export PYTHONPATH="\$AGENT_NEWSBOT_PREFIX\${PYTHONPATH:+:\$PYTHONPATH}"
 if [ -x "\$AGENT_NEWSBOT_PREFIX/.venv/bin/python" ]; then
   exec "\$AGENT_NEWSBOT_PREFIX/.venv/bin/python" -m agent_newsbot "\$@"
 fi

@@ -1,8 +1,21 @@
 import Foundation
+import Security
 
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "keychain-failure" {
+            var deletes = 0, adds = 0
+            let ops = Keychain.Operations(update: { _, _ in errSecAuthFailed },
+                add: { _ in adds += 1; return errSecSuccess },
+                delete: { _ in deletes += 1; return errSecSuccess },
+                read: { _ in (errSecAuthFailed, nil) })
+            var writeFailed = false, readFailed = false
+            do { try Keychain.set("new secret", account: "fixture", using: ops) } catch { writeFailed = true }
+            do { _ = try Keychain.get("fixture", using: ops) } catch { readFailed = true }
+            try output(["write_failed": writeFailed, "read_failed": readFailed, "deletes": deletes, "adds": adds])
+            return
+        }
         if args[1] == "fetch" {
             let results = await WorldMonitorClient.fetch(enabled: true, base: args[2], key: "test-fixture-key", variant: "tech", lookback: 100000, limit: 20)
             try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors)])
@@ -12,6 +25,16 @@ import Foundation
             let data = try Data(contentsOf: URL(fileURLWithPath: args[2]))
             let results = try WorldMonitorClient.parse(data: data, lookback: 12, limit: 20, now: Date(timeIntervalSince1970: 1795780800))
             try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors)])
+            return
+        }
+        if args[1] == "skill-install" {
+            try output(["installed": SkillInstaller.install(args[3], at: URL(fileURLWithPath: args[2]))])
+            return
+        }
+        if args[1] == "market-checkpoints" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: Any]]
+            let articles = try rows.map { try Article.fromWire($0) }
+            try output(["symbols": MarketsClient.checkpoints(for: articles, observations: [("AAA", "101"), ("BBB", "150")]).map { $0.0 }])
             return
         }
         let store = StoryStore(path: URL(fileURLWithPath: args[2]))
@@ -24,9 +47,35 @@ import Foundation
             } else { try output(["articles": try store.ingest(articles).map(\.wire)]) }
             return
         }
-        if args[1] == "serve" {
+        if args[1] == "lifecycle" {
+            let bridge = AgentBridge()
+            let occupied = AgentBridge()
+            let port = Int(args[3])!, other = Int(args[4])!
+            guard occupied.start(port: other, token: "occupied") else { throw StoryStore.Failure.database }
+            var failures = 0
+            for _ in 0..<300 {
+                if !bridge.start(port: port, token: "integration-test-token") { failures += 1 }
+            }
+            let rejected = !bridge.start(port: other, token: "new-token")
+            let preserved = bridge.isListening && Int(bridge.port) == port
+            for _ in 0..<100 {
+                bridge.stop()
+                if !bridge.start(port: port, token: "integration-test-token") { failures += 1 }
+            }
+            bridge.stop(); occupied.stop()
+            try output(["failures": failures, "occupied_rejected": rejected, "old_listener_preserved": preserved])
+            return
+        }
+        if args[1].hasPrefix("serve") {
             let bridge = AgentBridge()
             bridge.stories = store
+            if args[1] == "serve-slow" || args[1] == "serve-fail" {
+                bridge.fetchHandler = {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    if args[1] == "serve-fail" { throw StoryStore.Failure.database }
+                    return 7
+                }
+            }
             guard bridge.start(port: Int(args[3])!, token: "integration-test-token") else { throw StoryStore.Failure.database }
             FileHandle.standardOutput.write(Data("ready\n".utf8))
             while !Task.isCancelled { try await Task.sleep(nanoseconds: 1_000_000_000) }

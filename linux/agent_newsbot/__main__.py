@@ -23,9 +23,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from .config import SHARED
-    from .server import STATE
-
     if args.cmd == "fetch":
+        from .server import STATE
         snapshot = STATE.refresh()
         json.dump({"total_articles": snapshot.get("total_articles"), "desks": snapshot.get("desks")}, sys.stdout, indent=2)
         sys.stdout.write("\n")

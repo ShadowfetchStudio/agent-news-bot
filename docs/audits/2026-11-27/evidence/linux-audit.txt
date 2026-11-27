@@ -1,0 +1,3 @@
+..........................sss..s........s                                [100%]
+36 passed, 5 skipped in 5.66s
+/tmp/agent-newsbot-integration-0nqyOr/.venv/bin/python: No module named agent_newsbot

@@ -319,7 +319,10 @@ def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult
             log.warning("market %s failed: %s", symbol, exc)
             errors.append(f"{symbol}: quote failed")
     articles.sort(key=lambda a: abs(float(a.extra.get("change") or 0)), reverse=True)
-    return DeskResult("markets", articles[:limit], 0, skipped_dup, errors, quote_updates=quote_updates[:limit])
+    selected = articles[:limit]
+    selected_symbols = {a.extra["symbol"] for a in selected}
+    return DeskResult("markets", selected, 0, skipped_dup, errors,
+                      quote_updates=[q for q in quote_updates if q[0] in selected_symbols])
 
 
 WX = {

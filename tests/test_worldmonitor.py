@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import contextlib
 import json
 import os
 import subprocess
@@ -167,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "Freshness", "Hashtagger", "StoryStore", "WorldMonitorClient", "AgentBridge"]
+    files = ["Models", "Freshness", "Hashtagger", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     return dest
 
@@ -387,3 +388,143 @@ def test_database_failure_rolls_back_entire_batch(runtime, request, tmp_path):
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT count(*) FROM stories").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM members").fetchone()[0] == 0
+
+
+@contextmanager
+def native_bridge(binary, db, mode="serve"):
+    import socket, select
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
+    proc = subprocess.Popen([str(binary), mode, str(db), str(port)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert select.select([proc.stdout], [], [], 10)[0]
+        assert proc.stdout.readline().strip() == b"ready"
+        yield f"http://127.0.0.1:{port}", proc
+    finally:
+        if proc.poll() is None: proc.terminate()
+        proc.wait(timeout=10)
+
+
+def test_native_listener_restarts_and_failed_port_change(swift_harness, tmp_path):
+    import socket
+    with socket.socket() as a, socket.socket() as b:
+        a.bind(("127.0.0.1", 0)); b.bind(("127.0.0.1", 0))
+        ports = a.getsockname()[1], b.getsockname()[1]
+    result = swift(swift_harness, "lifecycle", tmp_path / "journal.sqlite", *ports)
+    assert result == {"failures": 0, "occupied_rejected": True, "old_listener_preserved": True}
+
+
+def test_native_disconnect_does_not_kill_bridge(swift_harness, tmp_path):
+    import socket, time
+    from urllib.parse import urlsplit
+    a = article(summary="x" * 1_000_000)
+    data = tmp_path / "input.json"; data.write_text(json.dumps([a]))
+    db = tmp_path / "journal.sqlite"
+    swift(swift_harness, "ingest", db, data)
+    with native_bridge(swift_harness, db) as (base, proc):
+        for _ in range(20):
+            with socket.create_connection(("127.0.0.1", urlsplit(base).port)) as sock:
+                sock.sendall(b"GET /v1/events?consumer=cancel HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer integration-test-token\r\n\r\n")
+                sock.shutdown(socket.SHUT_RDWR)
+            time.sleep(.01)
+        assert proc.poll() is None
+        assert requests.get(base + "/health", timeout=5).status_code == 200
+
+
+@pytest.mark.parametrize("runtime", ["python", "swift"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_fetch_job_truthful_completion(runtime, fails, request, tmp_path, monkeypatch):
+    import time
+    with contextlib.ExitStack() as stack:
+        if runtime == "swift":
+            binary = request.getfixturevalue("swift_harness")
+            base, _ = stack.enter_context(native_bridge(binary, tmp_path / "stories.sqlite", "serve-fail" if fails else "serve-slow"))
+            token = "integration-test-token"
+        else:
+            monkeypatch.setattr(server, "HOME", tmp_path)
+            monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+            state = server.NewsState(); monkeypatch.setattr(server, "STATE", state)
+            def fetch(*args):
+                time.sleep(2)
+                if fails: raise OSError("fixture storage failure")
+                return {"articles": [], "desks": []}
+            monkeypatch.setattr(server, "fetch_all", fetch)
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+            def stop(): httpd.shutdown(); httpd.server_close(); thread.join()
+            stack.callback(stop)
+            base = f"http://127.0.0.1:{httpd.server_port}"; token = state.token
+        headers = {"Authorization": "Bearer " + token}
+        start = time.monotonic()
+        response = requests.post(base + "/v1/fetch", headers=headers, timeout=1.5)
+        assert response.status_code == 202
+        assert time.monotonic() - start < 1.5
+        accepted = response.json()
+        assert accepted["fetch_job"]["state"] == "running"
+        assert "total_articles" not in accepted
+        assert requests.post(base + "/v1/fetch", headers=headers, timeout=1).status_code == 409
+        for _ in range(80):
+            status = requests.get(base + "/v1/status", headers=headers, timeout=1).json()
+            if status["fetch_job"]["state"] != "running": break
+            time.sleep(.05)
+        assert status["fetch_job"]["id"] == accepted["fetch_job"]["id"]
+        assert status["fetch_job"]["state"] == ("failed" if fails else "completed")
+        assert status["fetching"] is False
+        assert ("error" in status["fetch_job"]) == fails
+
+
+@pytest.mark.parametrize("symbols", ["AAA,BBB", "BBB,AAA"])
+@pytest.mark.parametrize("limit", [0, 1, 2])
+def test_market_checkpoint_matches_selected_symbol(monkeypatch, tmp_path, symbols, limit):
+    class Quote:
+        def __init__(self, url): self.url = url
+        def json(self):
+            return {"chart": {"result": [{"meta": {"regularMarketPrice": 101 if "/AAA?" in self.url else 150, "chartPreviousClose": 100}}]}}
+    monkeypatch.setattr(engine, "_get", lambda url, **kw: Quote(url))
+    result = engine.fetch_markets(FreshnessStore(tmp_path / "seen.sqlite"), symbols, limit)
+    assert {q[0] for q in result.quote_updates} == {a.extra["symbol"] for a in result.articles}
+    if limit == 1: assert result.articles[0].extra["symbol"] == "BBB"
+
+
+def test_swift_market_checkpoint_and_skill_preservation(swift_harness, tmp_path):
+    a = article(); a["desk"] = "markets"; a["extra"] = {"symbol": "BBB"}
+    data = tmp_path / "articles.json"; data.write_text(json.dumps([a]))
+    assert swift(swift_harness, "market-checkpoints", data)["symbols"] == ["BBB"]
+    skill = tmp_path / "skills/agent-news-bot/SKILL.md"
+    assert swift(swift_harness, "skill-install", skill, "custom first content")["installed"]
+    assert not swift(swift_harness, "skill-install", skill, "replacement")["installed"]
+    assert skill.read_text() == "custom first content"
+
+
+def test_undated_stories_expire_and_carry_counts_are_explicit(tmp_path, monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setattr(server, "HOME", tmp_path)
+    monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+    state = server.NewsState()
+    old = article(); old.update(published=None, first_seen="2000-01-01T00:00:00Z")
+    recent = article("https://example.com/recent"); recent.update(published=None, first_seen=datetime.now(timezone.utc).isoformat())
+    previous = {"articles": [old, recent], "fetched_at": datetime.now(timezone.utc).isoformat()}
+    result = state._keep_live_desks(previous, {"articles": [], "desks": [{"desk": "science", "fresh": 0}]})
+    assert [a["id"] for a in result["articles"]] == [recent["id"]]
+    desk = result["desks"][0]
+    assert (desk["new"], desk["updated"], desk["carried"], desk["displayed"], desk["fresh"]) == (0, 0, 1, 1, 0)
+    assert result["articles"][0]["first_seen"] == recent["first_seen"]
+    recent["first_seen"] = (datetime.now(timezone.utc) - timedelta(hours=server.LOOKBACK_HOURS + 1)).isoformat()
+    assert state._keep_live_desks(previous, {"articles": [], "desks": [{"desk": "science", "fresh": 0}]})["total_articles"] == 0
+
+
+def test_restored_snapshot_is_pruned_without_refresh(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "HOME", tmp_path)
+    monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+    state = server.NewsState()
+    old = article(); old.update(published=None, first_seen="2000-01-01T00:00:00Z")
+    state.latest_path.write_text(json.dumps({"articles": [old], "desks": [{"desk": "science", "fresh": 1}], "fetched_at": "2000-01-01T00:00:00Z"}))
+    restored = server.NewsState()
+    assert restored.snapshot["total_articles"] == 0
+    assert restored.snapshot["desks"][0]["displayed"] == 0
+
+
+def test_keychain_errors_do_not_erase_or_hide_credentials(swift_harness):
+    assert swift(swift_harness, "keychain-failure") == {
+        "write_failed": True, "read_failed": True, "deletes": 0, "adds": 0,
+    }

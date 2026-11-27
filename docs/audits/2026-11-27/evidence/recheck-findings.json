@@ -1,0 +1,62 @@
+{
+  "metadata_delivery": {
+    "fresh_metadata": {},
+    "event_metadata": {},
+    "stored_metadata": {
+      "importanceScore": 80,
+      "locationName": "Florida"
+    }
+  },
+  "wm_correction_after_direct": {
+    "events_emitted": 0,
+    "latest_deliverable_title": "NASA launches lunar orbiter to map south pole craters"
+  },
+  "opposing_headlines": {
+    "story_groups": 1,
+    "sources": 2,
+    "titles": [
+      "NASA confirms lunar orbiter launch will proceed despite engine issue",
+      "NASA confirms lunar orbiter launch will not proceed despite engine issue"
+    ]
+  },
+  "canonical_parity": [
+    {
+      "input": "https://example.com:8443/story",
+      "python": "https://example.com/story",
+      "swift": "https://example.com:8443/story"
+    },
+    {
+      "input": "https://example.com:9443/story",
+      "python": "https://example.com/story",
+      "swift": "https://example.com:9443/story"
+    },
+    {
+      "input": "https://example.com/story/?id=42",
+      "python": "https://example.com/story?id=42",
+      "swift": "https://example.com/story/?id=42"
+    },
+    {
+      "input": "https://example.com/story?id=42",
+      "python": "https://example.com/story?id=42",
+      "swift": "https://example.com/story?id=42"
+    }
+  ],
+  "bridge_restart": "restart failures: 13/30",
+  "undated_carryover": {
+    "articles_retained": 1,
+    "original_first_seen": "2000-01-01T00:00:00Z",
+    "fresh_count": 0
+  },
+  "rss_cap_checkpoint": {
+    "first_urls": [
+      "https://example.com/first"
+    ],
+    "second_urls": [],
+    "deferred_story_ever_returned": false
+  },
+  "installed_cli_lookup": {
+    "returncode": 1,
+    "stderr": "/private/tmp/agent-newsbot-integration-venv/bin/python: No module named agent_newsbot"
+  },
+  "journal_permissions": "0o644"
+}

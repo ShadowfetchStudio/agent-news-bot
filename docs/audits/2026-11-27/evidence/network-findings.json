@@ -1,0 +1,15 @@
+{
+  "fetch_timeout": {
+    "elapsed_seconds": 60.0,
+    "http": 200,
+    "body": {
+      "ok": true,
+      "total_articles": 0
+    },
+    "handler_completion_seconds": 65
+  },
+  "disconnect": {
+    "process_returncode": -13,
+    "attempts": 2
+  }
+}

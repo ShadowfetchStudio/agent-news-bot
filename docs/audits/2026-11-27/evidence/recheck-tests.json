@@ -1,0 +1,13 @@
+{
+  "commit": "165eff6a364457425d751c4ed6422f0a9917a37e",
+  "macos": {
+    "passed": 41,
+    "seconds": 8.39
+  },
+  "native_linux_isolated_copy": {
+    "passed": 36,
+    "skipped": 5,
+    "seconds": 5.65
+  },
+  "production_modified": false
+}

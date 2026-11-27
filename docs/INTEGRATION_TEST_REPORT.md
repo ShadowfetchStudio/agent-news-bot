@@ -1,3 +1,5 @@
+> Historical integration baseline. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for subsequent audit repairs and current release gates.
+
 # World Monitor integration test report
 
 Date: 2026-11-27 (America/New_York)

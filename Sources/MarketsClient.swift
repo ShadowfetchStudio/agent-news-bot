@@ -72,7 +72,12 @@ enum MarketsClient {
             abs(Double($0.extra["change"] ?? "0") ?? 0) > abs(Double($1.extra["change"] ?? "0") ?? 0)
         }
         if articles.count > maxItems { articles = Array(articles.prefix(maxItems)) }
-        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors, quoteUpdates: Array(quoteUpdates.prefix(articles.count)))
+        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors, quoteUpdates: checkpoints(for: articles, observations: quoteUpdates))
+    }
+
+    static func checkpoints(for articles: [Article], observations: [(String, String)]) -> [(String, String)] {
+        let selected = Set(articles.compactMap { $0.extra["symbol"] })
+        return observations.filter { selected.contains($0.0) }
     }
 
     private static func number(_ value: Any?) -> Double {

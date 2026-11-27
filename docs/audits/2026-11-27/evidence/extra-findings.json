@@ -1,0 +1,21 @@
+{
+  "swift_metadata_delivery": {
+    "fresh_metadata": {},
+    "event_metadata": {}
+  },
+  "swift_correction": {
+    "articles": []
+  },
+  "market_checkpoint_mismatch": {
+    "returned_symbols": [
+      "BBB"
+    ],
+    "saved_checkpoint_symbols": [
+      "AAA"
+    ]
+  },
+  "desk_count_parity": {
+    "total_articles": 1,
+    "desk_fresh": 0
+  }
+}

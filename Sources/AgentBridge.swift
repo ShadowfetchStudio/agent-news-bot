@@ -11,23 +11,34 @@ final class AgentBridge: @unchecked Sendable {
     private var source: DispatchSourceRead?
     private var fd: Int32 = -1
     private let queue = DispatchQueue(label: "ai.shadowfetch.agentnewsbot.bridge", attributes: .concurrent)
+    private let listenerQueue = DispatchQueue(label: "ai.shadowfetch.agentnewsbot.listener")
+    private let lifecycle = NSLock()
+    private let jobLock = NSLock()
+    private let clientSlots = DispatchSemaphore(value: 16)
+    private var job: [String: Any] = ["state": "idle"]
+    private var listenPort: UInt16 = 18765
+    private var authToken = ""
 
-    var port: UInt16 = 18765
-    var token: String = ""
+    var port: UInt16 { lifecycle.withLock { listenPort } }
+    var isListening: Bool { lifecycle.withLock { fd >= 0 } }
     var articlesProvider: () -> [Article] = { [] }
     var desksProvider: () -> [DeskResult] = { [] }
     var statusProvider: () -> BridgeStatusSnapshot = { BridgeStatusSnapshot(fresh: 0, fetchedAt: nil, fetching: false) }
     var stories: StoryStore?
-    var fetchHandler: (() async -> Int)?
+    var fetchHandler: (() async throws -> Int)?
 
     var endpoint: String { "http://127.0.0.1:\(port)" }
 
     @discardableResult
     func start(port: Int, token: String) -> Bool {
-        stop()
-        guard (1...65535).contains(port) else { return false }
-        self.port = UInt16(port)
-        self.token = token
+        guard (1...65535).contains(port), !token.isEmpty else { return false }
+        lifecycle.lock()
+        defer { lifecycle.unlock() }
+        if fd >= 0 && listenPort == UInt16(port) {
+            authToken = token
+            return true
+        }
+        // Bind the replacement before retiring a working listener.
 
         let sock = socket(AF_INET, SOCK_STREAM, 0)
         guard sock >= 0 else { return false }
@@ -36,7 +47,7 @@ final class AgentBridge: @unchecked Sendable {
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = self.port.bigEndian
+        addr.sin_port = UInt16(port).bigEndian
         addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
         let bindResult = withUnsafePointer(to: &addr) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -47,43 +58,66 @@ final class AgentBridge: @unchecked Sendable {
             close(sock)
             return false
         }
+        _ = fcntl(sock, F_SETFL, O_NONBLOCK)
+        stopLocked()
         fd = sock
-        let src = DispatchSource.makeReadSource(fileDescriptor: sock, queue: queue)
+        listenPort = UInt16(port)
+        authToken = token
+        let src = DispatchSource.makeReadSource(fileDescriptor: sock, queue: listenerQueue)
         src.setEventHandler { [weak self] in
-            self?.acceptOne()
+            self?.acceptOne(listener: sock)
         }
+        let closed = DispatchSemaphore(value: 0)
+        listenerClosed = closed
         src.setCancelHandler {
             close(sock)
+            closed.signal()
         }
         source = src
         src.resume()
         return true
     }
 
+    private var listenerClosed: DispatchSemaphore?
+
     func stop() {
+        lifecycle.withLock { stopLocked() }
+    }
+
+    // Only called under lifecycle; listener callbacks never acquire this lock.
+    private func stopLocked() {
         source?.cancel()
+        if let closed = listenerClosed { closed.wait() }
         source = nil
+        listenerClosed = nil
         fd = -1
     }
 
-    private func acceptOne() {
+    private func acceptOne(listener: Int32) {
         var addr = sockaddr()
         var len: socklen_t = socklen_t(MemoryLayout<sockaddr>.size)
-        let client = accept(fd, &addr, &len)
+        let client = accept(listener, &addr, &len)
         guard client >= 0 else { return }
+        _ = fcntl(client, F_SETFL, 0)
+        var yes: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size))
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard clientSlots.wait(timeout: .now()) == .success else { close(client); return }
+        let slots = clientSlots
         queue.async { [weak self] in
+            defer { close(client); slots.signal() }
             self?.serve(client)
-            close(client)
         }
     }
 
     private func serve(_ client: Int32) {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
         while data.range(of: Data("\r\n\r\n".utf8)) == nil {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return }
             let n = read(client, &buffer, buffer.count)
             if n <= 0 { return }
             data.append(buffer, count: n)
@@ -110,6 +144,7 @@ final class AgentBridge: @unchecked Sendable {
 
         let authHeader = headers["authorization"] ?? ""
         let altHeader = headers["x-agent-token"] ?? ""
+        let token = lifecycle.withLock { authToken }
         let authorized = Self.constantTimeEqual(authHeader, "Bearer \(token)")
             || Self.constantTimeEqual(altHeader, token)
 
@@ -194,20 +229,36 @@ final class AgentBridge: @unchecked Sendable {
                     "fetching": st.fetching
                 ]
                 payload["fetched_at"] = st.fetchedAt ?? NSNull()
+                let currentJob = jobLock.withLock { job }
+                payload["fetch_job"] = currentJob
+                payload["fetching"] = st.fetching || currentJob["state"] as? String == "running"
                 response = json(200, payload)
             }
         } else if path == "/v1/fetch" {
             if method != "POST" {
                 response = json(405, ["error": "method not allowed"])
             } else if let handler = fetchHandler {
-                let sem = DispatchSemaphore(value: 0)
-                var total = 0
-                Task {
-                    total = await handler()
-                    sem.signal()
+                let alreadyFetching = statusProvider().fetching
+                jobLock.lock()
+                if job["state"] as? String == "running" || alreadyFetching {
+                    let existing = job
+                    jobLock.unlock()
+                    response = json(409, ["error": "fetch already running", "fetching": true, "fetch_job": existing])
+                } else {
+                    let id = UUID().uuidString.lowercased()
+                    job = ["id": id, "state": "running", "started_at": ISO8601DateFormatter().string(from: Date())]
+                    let accepted = job
+                    jobLock.unlock()
+                    Task {
+                        do {
+                            let total = try await handler()
+                            self.finishJob(total: total, error: nil)
+                        } catch {
+                            self.finishJob(total: nil, error: "fetch failed; inspect source and storage status")
+                        }
+                    }
+                    response = json(202, ["accepted": true, "fetching": true, "fetch_job": accepted, "status_url": "/v1/status"])
                 }
-                _ = sem.wait(timeout: .now() + 60)
-                response = json(200, ["ok": true, "total_articles": total])
             } else {
                 response = json(503, ["error": "fetch handler unavailable"])
             }
@@ -215,6 +266,15 @@ final class AgentBridge: @unchecked Sendable {
             response = json(404, ["error": "not found"])
         }
         writeResponse(client, status: response.0, body: response.1)
+    }
+
+    private func finishJob(total: Int?, error: String?) {
+        jobLock.withLock {
+            job["state"] = error == nil ? "completed" : "failed"
+            job["finished_at"] = ISO8601DateFormatter().string(from: Date())
+            if let total { job["total_articles"] = total }
+            if let error { job["error"] = error }
+        }
     }
 
     private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
@@ -238,9 +298,17 @@ final class AgentBridge: @unchecked Sendable {
     }
 
     private func writeResponse(_ client: Int32, status: Int, body: Data) {
+        // Reject oversized responses before writing them to a client.
+        if body.count > 16 * 1024 * 1024 {
+            writeResponse(client, status: 413, body: Data("{\"error\":\"response too large; reduce limit\"}".utf8))
+            return
+        }
         let reason: String
         switch status {
         case 200: reason = "OK"
+        case 202: reason = "Accepted"
+        case 409: reason = "Conflict"
+        case 413: reason = "Content Too Large"
         case 400: reason = "Bad Request"
         case 401: reason = "Unauthorized"
         case 404: reason = "Not Found"
@@ -259,6 +327,7 @@ final class AgentBridge: @unchecked Sendable {
             var sent = 0
             while sent < payload.count {
                 let n = write(client, base + sent, payload.count - sent)
+                if n < 0 && errno == EINTR { continue }
                 if n <= 0 { break }
                 sent += n
             }

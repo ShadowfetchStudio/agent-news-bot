@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -17,6 +18,10 @@ from .store import FreshnessStore
 from .stories import StoryStore
 
 log = logging.getLogger("agent_newsbot")
+
+
+class FetchBusy(RuntimeError):
+    pass
 
 
 class NewsState:
@@ -37,12 +42,16 @@ class NewsState:
         }
         self.lock = threading.Lock()
         self.fetching = False
+        self.fetch_job: dict = {"state": "idle"}
         self._load_snapshot()
 
     def _load_snapshot(self) -> None:
         if self.latest_path.exists():
             try:
-                self.snapshot = json.loads(self.latest_path.read_text())
+                loaded = json.loads(self.latest_path.read_text())
+                # Restoring a snapshot must not renew its publication/observation date.
+                empty = dict(loaded, articles=[], desks=[dict(d, fresh=0) for d in loaded.get("desks", [])])
+                self.snapshot = self._keep_live_desks(loaded, empty)
             except Exception:
                 pass
 
@@ -58,49 +67,96 @@ class NewsState:
         path.chmod(0o640)
         return token
 
-    def refresh(self) -> dict:
+    def _begin_refresh(self) -> dict:
+        # Caller owns lock; periodic, manual and HTTP refreshes share this gate.
+        if self.fetching:
+            raise FetchBusy("fetch already running")
+        self.fetching = True
+        self.fetch_job = {
+            "id": str(uuid.uuid4()), "state": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return self.snapshot
+
+    def request_refresh(self) -> tuple[int, dict]:
         with self.lock:
             if self.fetching:
-                return self.snapshot
-            self.fetching = True
-            previous = self.snapshot
+                return 409, {"error": "fetch already running", "fetching": True,
+                             "fetch_job": dict(self.fetch_job)}
+            previous = self._begin_refresh()
+            accepted = dict(self.fetch_job)
+        def work() -> None:
+            try:
+                self._run_refresh(previous)
+            except Exception:
+                log.exception("requested fetch failed")
         try:
-            snapshot = fetch_all(self.store)
-            snapshot = self._keep_live_desks(previous, snapshot)
+            threading.Thread(target=work, daemon=True, name="requested-fetch").start()
+        except RuntimeError:
             with self.lock:
-                self.snapshot = snapshot
+                self.fetching = False
+                self.fetch_job.update(state="failed", error="fetch worker unavailable",
+                                      finished_at=datetime.now(timezone.utc).isoformat())
+            return 503, {"error": "fetch worker unavailable", "fetching": False}
+        return 202, {"accepted": True, "fetching": True, "fetch_job": accepted,
+                     "status_url": "/v1/status"}
+
+    def refresh(self) -> dict:
+        with self.lock:
+            previous = self._begin_refresh()
+        return self._run_refresh(previous)
+
+    def _run_refresh(self, previous: dict) -> dict:
+        outcome: dict = {"state": "failed", "error": "fetch failed; inspect source and storage status"}
+        try:
+            snapshot = self._keep_live_desks(previous, fetch_all(self.store))
             tmp = self.latest_path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(snapshot, indent=2))
+            tmp.chmod(0o600)
             tmp.replace(self.latest_path)
-            self.latest_path.chmod(0o640)
+            with self.lock:
+                self.snapshot = snapshot
+            outcome = {"state": "completed", "total_articles": snapshot.get("total_articles", 0)}
             log.info("fresh fetch: %s articles", snapshot.get("total_articles"))
             return snapshot
         finally:
             with self.lock:
+                self.fetch_job.update(outcome)
+                self.fetch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
                 self.fetching = False
 
+    @staticmethod
+    def _story_time(item: dict, batch_time: str | None) -> datetime | None:
+        for value in (item.get("published"), item.get("first_seen"), batch_time):
+            if not value:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+        return None
+
     def _keep_live_desks(self, previous: dict, snapshot: dict) -> dict:
-        """If a desk has no new items, keep still-fresh articles from the last batch."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
+        """Keep eligible unchanged desks, with immutable fallback dates and explicit counts."""
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=LOOKBACK_HOURS)
+        def live(item: dict, batch: dict) -> bool:
+            dt = self._story_time(item, batch.get("fetched_at"))
+            return dt is not None and cutoff <= dt <= now + timedelta(minutes=5)
         new_by_desk = {row["desk"]: row.get("fresh", 0) for row in snapshot.get("desks") or []}
-        kept: list[dict] = list(snapshot.get("articles") or [])
+        kept = [dict(item, carried=False) for item in snapshot.get("articles") or [] if live(item, snapshot)]
         seen = {item["id"] for item in kept}
         for item in previous.get("articles") or []:
-            if new_by_desk.get(item.get("desk"), 1) != 0:
+            if new_by_desk.get(item.get("desk"), 1) != 0 or item.get("id") in seen:
                 continue
-            if item.get("id") in seen:
-                continue
-            published = item.get("published") or ""
-            try:
-                dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-            except Exception:
-                dt = datetime.now(timezone.utc)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if dt >= cutoff:
-                kept.append(item)
+            if live(item, previous):
+                carried = dict(item, carried=True)
+                if not carried.get("first_seen"):
+                    carried["first_seen"] = self._story_time(item, previous.get("fetched_at")).isoformat()
+                kept.append(carried)
                 seen.add(item["id"])
-        kept.sort(key=lambda item: item.get("published") or "", reverse=True)
+        kept.sort(key=lambda item: self._story_time(item, snapshot.get("fetched_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         snapshot["articles"] = kept
         snapshot["total_articles"] = len(kept)
         categories: dict[str, list] = {}
@@ -108,6 +164,13 @@ class NewsState:
             title = item.get("category") or item.get("desk")
             categories.setdefault(title, []).append(item)
         snapshot["categories"] = categories
+        for desk in snapshot.get("desks") or []:
+            items = [item for item in kept if item.get("desk") == desk["desk"]]
+            carried = sum(bool(item.get("carried")) for item in items)
+            updated = sum(not item.get("carried") and item.get("change") in ("updated", "enriched", "corrected") for item in items)
+            fresh = len(items) - carried
+            desk.update(new=fresh - updated, updated=updated, carried=carried,
+                        displayed=len(items), fresh=fresh)
         return snapshot
 
 
@@ -122,12 +185,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, indent=2).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
+        if len(body) > 16 * 1024 * 1024:
+            status = 413
+            body = b'{"error":"response too large; reduce limit"}'
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _authorized(self) -> bool:
         auth = self.headers.get("Authorization", "")
@@ -194,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
             with STATE.lock:
                 snap = STATE.snapshot
                 fetching = STATE.fetching
+                job = dict(STATE.fetch_job)
             self._send(
                 200,
                 {
@@ -201,6 +271,7 @@ class Handler(BaseHTTPRequestHandler):
                     "fresh": snap.get("total_articles", 0),
                     "fetched_at": snap.get("fetched_at"),
                     "fetching": fetching,
+                    "fetch_job": job,
                 },
             )
             return
@@ -226,8 +297,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(405, {"error": "method not allowed"})
             return
         if parsed.path == "/v1/fetch":
-            snapshot = STATE.refresh()
-            self._send(200, {"ok": True, "total_articles": snapshot.get("total_articles", 0)})
+            status, payload = STATE.request_refresh()
+            self._send(status, payload)
             return
         self._send(404, {"error": "not found"})
 
@@ -241,6 +312,8 @@ def loop_fetch() -> None:
     while True:
         try:
             STATE.refresh()
+        except FetchBusy:
+            pass
         except Exception:
             log.exception("periodic fetch failed")
         time.sleep(FETCH_INTERVAL)

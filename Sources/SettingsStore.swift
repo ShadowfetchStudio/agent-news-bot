@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import Combine
 
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -55,39 +56,66 @@ final class SettingsStore: ObservableObject {
         defaults.set(enabledDesks.map(\.rawValue), forKey: "enabledDesks")
     }
 
-    var worldMonitorKey: String {
-        get { Keychain.get("worldmonitor") ?? "" }
-        set { Keychain.set(newValue, account: "worldmonitor") }
-    }
+    @Published var credentialError = ""
 
-    var hermesToken: String {
-        get { Keychain.get("hermes-api") ?? "" }
-        set { Keychain.set(newValue, account: "hermes-api") }
-    }
+    var worldMonitorKey: String { readCredential("worldmonitor") }
+    var hermesToken: String { readCredential("hermes-api") }
+    var openClawToken: String { readCredential("openclaw") }
 
-    var openClawToken: String {
-        get { Keychain.get("openclaw") ?? "" }
-        set { Keychain.set(newValue, account: "openclaw") }
+    private func readCredential(_ account: String) -> String {
+        do { return try Keychain.get(account) ?? "" }
+        catch { credentialError = error.localizedDescription; return "" }
     }
 }
 
 enum Keychain {
-    static func set(_ value: String, account: String) {
-        let data = Data(value.utf8)
+    struct Operations {
+        var update: (CFDictionary, CFDictionary) -> OSStatus
+        var add: (CFDictionary) -> OSStatus
+        var delete: (CFDictionary) -> OSStatus
+        var read: (CFDictionary) -> (OSStatus, Data?)
+        static var system: Operations {
+            Operations(update: { SecItemUpdate($0, $1) },
+                add: { SecItemAdd($0, nil) }, delete: { SecItemDelete($0) },
+                read: { query in
+                    var out: AnyObject?
+                    let status = SecItemCopyMatching(query, &out)
+                    return (status, out as? Data)
+                })
+        }
+    }
+
+    struct Failure: LocalizedError {
+        let status: OSStatus
+        var errorDescription: String? {
+            "Keychain operation failed: " + (SecCopyErrorMessageString(status, nil) as String? ?? String(status))
+        }
+    }
+
+    static func set(_ value: String, account: String, using operations: Operations = .system) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppPaths.bundleId,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = query
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+        if value.isEmpty {
+            let status = operations.delete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure(status: status) }
+            return
+        }
+        // Update in place. A failure never deletes the previous credential.
+        let data = Data(value.utf8)
+        let status = operations.update(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = query
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            let added = operations.add(add as CFDictionary)
+            guard added == errSecSuccess else { throw Failure(status: added) }
+        } else if status != errSecSuccess { throw Failure(status: status) }
     }
 
-    static func get(_ account: String) -> String? {
+    static func get(_ account: String, using operations: Operations = .system) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: AppPaths.bundleId,
@@ -95,9 +123,10 @@ enum Keychain {
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-        var out: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &out)
-        guard status == errSecSuccess, let data = out as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let (status, data) = operations.read(query as CFDictionary)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw Failure(status: status) }
+        guard let data, let value = String(data: data, encoding: .utf8) else { throw Failure(status: errSecDecode) }
+        return value
     }
 }

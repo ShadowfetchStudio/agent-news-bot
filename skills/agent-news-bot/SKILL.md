@@ -1,14 +1,14 @@
 ---
 name: agent-news-bot
 description: Pull new and updated news from the local Agent News Bot Mac app (RSS, AI, HN, Polymarket, markets, weather) over localhost HTTP.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Agent News Bot
 
 Agent News Bot is a native macOS newsroom. It keeps a local SQLite freshness ledger (with 30-day retention, `ETag`/`If-Modified-Since` RSS caching, and cross-desk fuzzy title deduplication) and only serves stories that have not been shown before and are inside the lookback window.
 
-On launch, the app installs a skill descriptor to `~/.hermes/skills/agent-news-bot/SKILL.md` and `~/.agents/skills/agent-news-bot/SKILL.md` referencing the `0600` token file (never embedding the raw token in plaintext):
+Use **Settings → Agent bridge → Install agent skills** to create descriptors (existing files are preserved) at `~/.hermes/skills/agent-news-bot/SKILL.md` and `~/.agents/skills/agent-news-bot/SKILL.md` referencing the `0600` token file (never embedding the raw token in plaintext):
 
 ```text
 ~/Library/Application Support/AgentNewsBot/bridge.token

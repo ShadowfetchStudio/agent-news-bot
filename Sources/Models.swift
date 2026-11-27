@@ -103,11 +103,18 @@ struct Article: Identifiable, Hashable, Codable {
 
     static func fromWire(_ value: [String: Any]) throws -> Article {
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        var details: [String: String] = [:]
+        for (key, item) in value["extra"] as? [String: Any] ?? [:] {
+            if let text = item as? String { details[key] = text }
+            else if JSONSerialization.isValidJSONObject(item) {
+                details[key] = String(decoding: try JSONSerialization.data(withJSONObject: item, options: [.sortedKeys]), as: UTF8.self)
+            }
+        }
         return Article(id: value["id"] as? String ?? "", desk: Desk(rawValue: value["desk"] as? String ?? "") ?? .world,
             title: value["title"] as? String ?? "", url: value["url"] as? String ?? "", source: value["source"] as? String ?? "",
             published: DateStamp.parse(value["published"] as? String ?? ""), summary: value["summary"] as? String ?? "",
             tweet: value["tweet"] as? String ?? "", tweetChars: value["tweet_chars"] as? Int ?? 0,
-            hashtags: value["hashtags"] as? [String] ?? [], extra: [:], storyJSON: String(decoding: data, as: UTF8.self))
+            hashtags: value["hashtags"] as? [String] ?? [], extra: details, storyJSON: String(decoding: data, as: UTF8.self))
     }
 
     var host: String {
