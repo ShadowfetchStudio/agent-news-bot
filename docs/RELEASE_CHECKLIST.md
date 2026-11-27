@@ -45,7 +45,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Manual story-group split/merge with preserved identities, event history and explicit editorial review of legacy groups.
 - [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
 - [x] Source-quality explanations without inferred factual verification.
-- [ ] YouTube/X/TikTok draft templates, editorial approval state, ranked briefs and VideoBot export.
+- [x] YouTube/X/TikTok draft templates, editorial approval state, ranked briefs and manual VideoBot Inspect URLs export.
 
 ## Automation and maintenance
 
@@ -275,3 +275,15 @@ Recovery packaging check: a development wheel built through an isolated build ba
 Ranked editorial briefs, broader follow-up workflows, retention and remaining release/integration/distribution gates stay open. The larger editorial checkbox is not closed by platform approval alone.
 
 Final platform-approval focused verification: **16 passed on Mac; 8 passed / 8 Mac-only skips on native Pop!_OS**. The final full commit is covered by GitHub CI in the PR; local full-suite counts above identify their exact scope rather than implying a rerun after the final two cases.
+
+
+## Source-linked editorial brief batch
+
+- Added matching deterministic Swift/Python briefs: retained report, prior-event headline/summary comparisons, added/removed sources, attributed provider observations, difference flags, unknowns, follow-up questions, saved notes and transparent review-priority components. These are retained reports, not verified facts or finished scripts; no model/provider call is made.
+- Reads pin story, editorial state and prior events to one SQLite snapshot. Research exports use that same snapshot and add structured `brief` plus `brief.md` alongside the three existing files. A concurrent external correction/notes write cannot contaminate an in-flight export. Alias IDs resolve without changing editorial state or consumer progress.
+- Authenticated `GET /v1/library/brief?id=ID`, capability `editorial_brief: 1`, Linux `brief ID` and native Brief tab. Evidence is capped at 20 source links/eight observations, text at 2,000 Unicode code points, with explicit excerpt markers. Markdown escapes source text; native source actions retain the shared URL validator.
+- Full local Mac regression suite: **341 passed**. Native Pop!_OS: **188 passed / 153 Mac-only skips**. Three additional alias/snapshot cases were then added: final focused Mac **13 passed**; native Linux **7 passed / 6 Mac-only skips**. The source-equivalent final full CI counts are expected to include those extra cases, but are not claimed until observed.
+- Native Apple Silicon build completed without warnings and strict ad-hoc signature verification passed. The first accessibility refinement exposed a SwiftUI accessibility recursion crash when expanding a labeled disclosure. Replaced that group with an explicit labeled expand/collapse button; repeated expansion/collapse, both sources, accessibility reads and source layout passed on the rebuilt app. This is focused accessibility acceptance, not a full VoiceOver walkthrough.
+- Actual Mac Export action created four private files; `brief.md` equals `research.json.brief.markdown`, and the live authenticated brief matches the export. Fixture evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-brief-ui-l28s4qmf/verification.json`; brief SHA256 `e38416641e343458843b39704cc9d7842c5cc9ddbd644ca08264c97642369b13`. Isolated app/preferences cleaned up; production state was not replaced.
+
+The editorial export checkbox is closed at its stated manual-handoff scope. Persistent follow-up/alert workflows, consumer-aware retention, broader recovery, complete accessibility/real-agent/provider acceptance and final distribution remain separate open work.

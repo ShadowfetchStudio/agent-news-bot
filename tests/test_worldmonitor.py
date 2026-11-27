@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "EditorialBrief", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -703,6 +703,7 @@ def journal_runtime(request, tmp_path):
             return result
         def repair_receipt(self, op): return self.op({"op": "repair-receipt", "id": op}) or None
         def reconcile_groups(self, stories): return self.op({"op": "reconcile-groups", "stories": stories})["stories"]
+        def research_brief(self, sid): return self.op({"op": "brief", "id": sid})
         def research_export(self, sid): return self.op({"op": "export", "id": sid})
     return Native()
 
@@ -1289,7 +1290,7 @@ def test_library_files_export_private_and_no_overwrite(journal_runtime, tmp_path
         return write_package(journal_runtime.research_export(sid), parent)
     first, second = export(), export()
     assert first != second and first.is_dir() and second.is_dir()
-    assert {p.name for p in first.iterdir()} == {"research.json", "sources.txt", "posts.md"}
+    assert {p.name for p in first.iterdir()} == {"research.json", "sources.txt", "posts.md", "brief.md"}
     assert json.loads((first / "research.json").read_text())["story"]["id"] == sid
     assert (first / "sources.txt").read_text().strip() == row["url"]
     assert "youtube_title" in (first / "posts.md").read_text()
@@ -1969,3 +1970,148 @@ def test_python_connection_transport_diagnostics(monkeypatch):
     def timeout(*args): raise subprocess.TimeoutExpired("worker",20)
     monkeypatch.setattr(worldmonitor,"bounded_request",timeout)
     assert worldmonitor.test_connection("https://example.com","full","")["code"]=="timeout"
+
+
+def test_editorial_brief_correction_evidence_and_saved_state(journal_runtime):
+    a = article(summary="Original report"); a['published'] = None
+    row = journal_runtime.ingest([a])[0]; sid = row['id']
+    before = journal_runtime.research_brief(sid)
+    assert before['previous_revision'] is None
+    assert before['changes'] == [] and before['source_count'] == 1
+    assert before['evidence'][0]['published'] is None
+    assert 'establish_timeline' in {t['id'] for t in before['follow_up']}
+    journal_runtime.save_editorial(sid, dict(expected_revision=1, expected_editorial_version=0,
+        draft_patch={'x_post':'An editorial draft'}, platform_status={'x':'approved'}, notes='Investigate primary evidence'))
+    a['summary'] = 'Correction: the launch was postponed.'
+    journal_runtime.ingest([a])
+    brief = journal_runtime.research_brief(sid)
+    assert brief['story_revision'] == 2 and brief['previous_revision'] == 1
+    assert brief['editorial_version'] == 1
+    assert brief['changes'] == [dict(field='summary', before='Original report', after=a['summary'])]
+    assert brief['editorial_notes'] == 'Investigate primary evidence'
+    assert {'check_correction','review_platforms'} <= {t['id'] for t in brief['follow_up']}
+    assert brief['priority']['score'] == 15
+    assert brief['priority']['meaning'] == 'Review priority, not truth or newsworthiness.'
+    exported = journal_runtime.research_export(sid)
+    assert exported['brief'] == brief
+    assert exported['story']['revision'] == brief['story_revision']
+    assert exported['story']['editorial']['version'] == brief['editorial_version']
+    assert journal_runtime.research_brief(sid) == brief  # reading changes no editorial state
+    assert len(journal_runtime.pending('brief-reader')['events']) == 2
+
+
+def test_editorial_brief_reports_differences_without_fact_claims(journal_runtime):
+    direct = article()
+    digest = article(title='NASA postpones lunar orbiter launch', provider='worldmonitor')
+    row = journal_runtime.ingest([direct, digest])[0]
+    brief = journal_runtime.research_brief(row['id'])
+    assert brief['differences'][0]['kind'] == 'provider_headline_difference'
+    assert brief['differences'][0]['source_ids'] == ['S1']
+    assert {v['provider'] for v in brief['evidence'][0]['observations']} == {'direct','worldmonitor'}
+    assert 'not independently verified facts' in brief['scope']
+    assert 'resolve_differences' in {t['id'] for t in brief['follow_up']}
+    assert 'No difference flag' not in brief['markdown']
+
+
+def test_editorial_brief_builder_parity_and_excerpt_limits(swift_harness, tmp_path):
+    from agent_newsbot.briefs import build_brief
+    source = dict(url='https://example.com/a', source='Publisher <script>', title='**Headline**',
+        summary='🛰️' * 3000, published=None, observations={f'p{i}':dict(title=f'Title {i}',summary='Summary',published=None) for i in range(10)})
+    story = dict(id='fixture',revision=2,title='<img src=x onerror=attack()>',summary='[Click](javascript:attack)',
+        updated_at='fixture-time',change='updated',sources=[dict(source,url=f'https://example.com/{i:02}') for i in range(25)],
+        editorial=dict(version=1,notes='### Forged heading',platforms={}))
+    previous = dict(story, revision=1,title='Before',sources=[])
+    expected = build_brief(story, previous)
+    path=tmp_path/'brief.json'; path.write_text(json.dumps(dict(op='build-brief',story=story,previous=previous)))
+    actual = swift(swift_harness,'library-op',tmp_path/'db.sqlite',path)
+    assert actual == expected
+    assert expected['truncated'] and expected['omitted_sources'] == 5
+    assert len(expected['evidence']) == 20 and len(expected['added_sources']) == 20
+    assert all(len(s['observations']) == 8 and s['omitted_observations'] == 2 for s in expected['evidence'])
+    assert len(expected['evidence'][0]['summary']) == 2001
+    assert '<img' not in expected['markdown'] and '<script>' not in expected['markdown']
+    assert '\n\n### Forged heading' not in expected['markdown']
+    assert expected['excerpted_fields']
+
+
+@pytest.mark.parametrize('runtime',['python','swift'])
+def test_editorial_brief_http_contract(runtime, request, tmp_path, monkeypatch):
+    with contextlib.ExitStack() as stack:
+        if runtime == 'swift':
+            binary=request.getfixturevalue('swift_harness'); db=tmp_path/'stories.sqlite'
+            data=tmp_path/'rows.json'; data.write_text(json.dumps([article()]))
+            row=swift(binary,'ingest',db,data)['articles'][0]
+            base,_=stack.enter_context(native_bridge(binary,db)); token='integration-test-token'
+        else:
+            monkeypatch.setattr(server,'HOME',tmp_path); monkeypatch.setattr(server,'SHARED',tmp_path/'shared')
+            state=server.NewsState(); monkeypatch.setattr(server,'STATE',state)
+            row=state.stories.ingest([article()])[0]
+            httpd=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+            thread=threading.Thread(target=httpd.serve_forever,daemon=True); thread.start()
+            def stop(): httpd.shutdown(); httpd.server_close(); thread.join()
+            stack.callback(stop); base=f'http://127.0.0.1:{httpd.server_port}'; token=state.token
+        headers={'Authorization':'Bearer '+token}; route=base+'/v1/library/brief'
+        assert requests.get(route,timeout=5).status_code == 401
+        for query in ('','?id=','?id=x&other=1'):
+            assert requests.get(route+query,headers=headers,timeout=5).status_code == 400
+        assert requests.get(route+'?id=missing',headers=headers,timeout=5).status_code == 404
+        assert requests.post(route,headers=headers,json={},timeout=5).status_code == 405
+        brief=requests.get(route+'?id='+row['id'],headers=headers,timeout=5)
+        assert brief.status_code == 200
+        assert brief.json()['story_revision'] == 1
+        capabilities=requests.get(base+'/v1/capabilities',headers=headers,timeout=5).json()
+        assert capabilities['features']['editorial_brief'] == 1
+        assert capabilities['routes']['/v1/library/brief'] == ['GET']
+
+
+def test_editorial_brief_cli_uses_retained_journal_only(tmp_path):
+    journal=StoryStore(tmp_path/'stories.sqlite'); row=journal.ingest([article()])[0]
+    env=dict(os.environ,AGENT_NEWSBOT_HOME=str(tmp_path),PYTHONPATH=str(ROOT/'linux'))
+    result=subprocess.run([sys.executable,'-m','agent_newsbot','brief',row['id']],env=env,cwd='/tmp',capture_output=True,text=True)
+    assert result.returncode == 0, result.stderr
+    brief=json.loads(result.stdout)
+    assert brief == journal.research_brief(row['id'])
+    assert len(journal.pending('cli-reader')['events']) == 1
+
+
+def test_editorial_brief_export_keeps_one_snapshot_during_external_update(tmp_path):
+    journal = StoryStore(tmp_path/'stories.sqlite')
+    writer = StoryStore(journal.path)
+    a = article(summary='Before concurrent correction')
+    row = journal.ingest([a])[0]; sid = row['id']
+    original = journal.connect
+    updated = False
+    @contextmanager
+    def interleaved():
+        nonlocal updated
+        with original() as db:
+            class Connection:
+                def execute(self, sql, args=()):
+                    nonlocal updated
+                    cursor = db.execute(sql, args)
+                    if not updated and sql.startswith('SELECT payload,id FROM stories'):
+                        updated = True
+                        writer.ingest([dict(a, summary='Concurrent correction')])
+                        writer.save_editorial(sid, dict(expected_revision=2, expected_editorial_version=0, notes='New notes'))
+                    return cursor
+            yield Connection()
+    journal.connect = interleaved
+    package = journal.research_export(sid)
+    assert updated
+    assert package['story']['revision'] == package['brief']['story_revision'] == 1
+    assert package['brief']['previous_revision'] is None
+    assert package['brief']['editorial_version'] == 0
+    assert package['brief']['editorial_notes'] == ''
+    fresh = journal.research_export(sid)
+    assert fresh['story']['revision'] == fresh['brief']['story_revision'] == 2
+    assert fresh['brief']['previous_revision'] == 1
+    assert fresh['brief']['editorial_notes'] == 'New notes'
+
+
+def test_editorial_brief_resolves_legacy_alias_without_mutation(journal_runtime):
+    from agent_newsbot.store import article_id
+    import sqlite3
+    row=journal_runtime.ingest([article()])[0]; sid=row['id']
+    with sqlite3.connect(journal_runtime.path) as db:
+        db.execute('INSERT INTO identity_aliases(alias,story_id) VALUES (?,?)',('legacy-brief-id',sid))
+    assert journal_runtime.research_brief('legacy-brief-id') == journal_runtime.research_brief(sid)

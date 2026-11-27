@@ -158,6 +158,7 @@ struct EditorialView: View {
     @State private var summary = ""
     @State private var sourceURLs: [String] = []
     @State private var groupingDetails = ""
+    @State private var savedBrief: [String: Any]?
     @State private var retired = false
     private var fingerprint: String {
         let value: [String: Any] = ["notes": notes, "status": status, "bookmarked": bookmarked, "drafts": drafts]
@@ -188,6 +189,10 @@ struct EditorialView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding()
                 }.tabItem { Text("Story") }
+                Group {
+                    if let savedBrief { EditorialBriefView(brief: savedBrief) }
+                    else { Text("The saved research changed or could not be read. Reload the saved version to view its brief.").padding() }
+                }.tabItem { Text("Brief") }
                 draftEditor("youtube_title", label: "YouTube title", second: "youtube_description").tabItem { Text("YouTube") }
                 draftEditor("x_post", label: "X post").tabItem { Text("X") }
                 draftEditor("tiktok_caption", label: "TikTok caption").tabItem { Text("TikTok") }
@@ -199,7 +204,7 @@ struct EditorialView: View {
                 }.padding().tabItem { Text("Notes / sources") }
             }
             if !message.isEmpty { Text(message).font(.callout).textSelection(.enabled) }
-            if dirty { Text("Unsaved changes. Exports contain the last saved version.").font(.caption).foregroundStyle(.orange) }
+            if dirty { Text("Unsaved changes. The brief and exports contain the last saved version.").font(.caption).foregroundStyle(.orange) }
             HStack {
                 Button("Reload saved version") { if dirty { pendingDiscard = "reload" } else { load() } }
                 Button(drafts.isEmpty ? "Generate draft templates" : "Regenerate templates…") { if drafts.isEmpty { save(generate: true) } else { confirmGenerate = true } }.disabled(retired)
@@ -265,6 +270,9 @@ struct EditorialView: View {
         groupingDetails = details.joined(separator: "\n")
         sourceURLs = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String })).sorted()
         sources = Array(Set((row["sources"] as? [[String: Any]] ?? []).compactMap { $0["source"] as? String })).sorted()
+        if let brief = try? store.researchBrief(storyID), brief["story_revision"] as? Int == revision, brief["editorial_version"] as? Int == version {
+            savedBrief = brief
+        } else { savedBrief = nil }
         loaded = true
         savedFingerprint = fingerprint
     }

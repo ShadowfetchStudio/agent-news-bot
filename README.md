@@ -151,6 +151,8 @@ See [the story model and migration contract](docs/STORY_MODEL.md) for selection 
 
 Consumer recovery now includes backlog/acknowledgement status, history/date/now starting points, explicit replay and optional worker leases. Event responses carry a generation to fence stale acknowledgements after resets. See [consumer recovery and the idempotent reference worker](docs/CONSUMER_RECOVERY.md) before using these controls with an existing automation.
 
+Source-linked editorial briefs now organize retained reports, corrections, source evidence, unknowns and follow-up questions in the Mac editor, Linux `brief` command and authenticated API. Each research package adds `brief.md` and a structured brief from the same database snapshot. These are attributed research aids, not automated fact-checks or completed scripts. See [editorial briefs](docs/EDITORIAL_BRIEFS.md).
+
 Research backups now have explicit `backup`, `verify-backup` and `restore-research` commands. They preserve the shared Mac/Linux journal and optional caches using SQLite snapshots, verify hashes/integrity and restore only into a new folder. Credentials, configuration, exports and downstream agent state are separate; old consumer checkpoints need reconciliation before reconnecting. The native app includes the same standalone helper (Python 3.10+ required only for recovery). See [research recovery and its limits](docs/RESEARCH_RECOVERY.md).
 Stories and events currently remain until explicitly managed; automated retention is a release task.
 

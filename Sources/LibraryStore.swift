@@ -205,7 +205,7 @@ extension StoryStore {
         }
     }
     func researchExport(_ id: String) throws -> [String: Any] {
-        guard let story = try editorial(id) else { throw LibraryFailure.missing }
+        let context = try researchContext(id), story = context.story
         guard story["merged_into"] == nil else { throw LibraryFailure.conflict("story was merged; export its destination instead") }
         do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; export is disabled.") }
         var seen = Set<String>()
@@ -214,6 +214,7 @@ extension StoryStore {
         return ["schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": (story["editorial"] as? [String: Any])?["status"] as? String == "approved", "source_urls": urls,
                 "platform_approvals": (story["editorial"] as? [String: Any])?["platforms"] ?? [:],
+                "brief": EditorialBrief.build(story, previous: context.previous),
                 "videobot": ["action": "inspect", "urls": urls, "instructions": "Paste these source URLs into VideoBot Inspect URLs, review discovered media, then choose what to queue. No media availability or reuse permission is implied."],
                 "rights": "unknown; review each source before reuse", "publishing": "manual only"]
     }

@@ -11,7 +11,7 @@ The response advertises:
 - `error_schema_version: 1`: structured error format.
 - `app_version`: packaged application version, distinct from protocol version.
 - `implementation`: `swift` or `python`; all other advertised contract fields have cross-runtime parity tests.
-- `features`: integer versions for async fetch, durable stories, source observations, revision history, consumer delivery/generations/leases, research library, editorial drafts, platform approval, research export, group repair, persistent source health and optional World Monitor digest support.
+- `features`: integer versions for async fetch, durable stories, source observations, revision history, consumer delivery/generations/leases, research library, editorial drafts, editorial briefs, platform approval, research export, group repair, persistent source health and optional World Monitor digest support.
 
 `platform_approval: 1` enables [independent platform decisions and draft patches](PLATFORM_APPROVAL.md) on the existing editorial route. The aggregate export `approved` retains its whole-package meaning; platform consumers inspect `platform_approvals` and the source revision.
 - `routes`: canonical route templates and supported methods. Substitute a canonical story ID for `{id}`. Use the feature-specific guides for request/query fields.
@@ -65,3 +65,5 @@ The [reference consumer](../examples/reliable_consumer.py) negotiates capabiliti
 Live Swift/Python bridge tests run the example twice: the first run commits and acknowledges a fixture story, while the second commits zero new records and leaves a single inbox entry. Separate crash-before-ack tests prove replay idempotency. These checks do not execute external publishing or replace the need for an idempotent downstream sink.
 
 Source resilience adds `source_health: 1` and authenticated `GET /v1/sources` (no query parameters). The bounded response is `{ "sources": [...] }`; see [SOURCE_HEALTH.md](SOURCE_HEALTH.md) for field meanings, retry policy and interpretation limits.
+
+`editorial_brief: 1` enables authenticated `GET /v1/library/brief?id=ID` and the `brief` field in research exports. See [source-linked briefs](EDITORIAL_BRIEFS.md) for snapshot consistency, excerpt limits and the distinction between retained reporting and verified facts.

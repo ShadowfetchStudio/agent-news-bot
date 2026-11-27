@@ -198,15 +198,31 @@ class LibraryMixin:
                     db.execute("INSERT OR REPLACE INTO library_preferences VALUES (?,?,?)", (kind, name, json.dumps(value)))
             return {"preferences": [{"kind": k, "name": n, "value": json.loads(v)} for k, n, v in db.execute("SELECT kind,name,payload FROM library_preferences ORDER BY kind,name")]}
 
+    def research_context(self, story_id):
+        # Pin all three reads to one SQLite snapshot, including other processes.
+        with self.lock, self.connect() as db:
+            db.execute("BEGIN")
+            row = db.execute("SELECT payload,id FROM stories WHERE id=COALESCE((SELECT id FROM stories WHERE id=?),(SELECT story_id FROM identity_aliases WHERE alias=?))", (story_id, story_id)).fetchone()
+            if not row: raise LookupError("story not found")
+            state = db.execute("SELECT payload FROM editorial WHERE story_id=?", (row[1],)).fetchone()
+            events = db.execute("SELECT payload FROM events WHERE story_id=? ORDER BY seq DESC LIMIT 2", (row[1],)).fetchall()
+            return (decorate(json.loads(row[0]), json.loads(state[0]) if state else {}),
+                    json.loads(events[1][0]) if len(events) > 1 else None)
+
+    def research_brief(self, story_id):
+        from .briefs import build_brief
+        story, previous = self.research_context(story_id)
+        return build_brief(story, previous)
+
     def research_export(self, story_id):
-        story = self.editorial(story_id)
-        if story is None: raise LookupError("story not found")
+        from .briefs import build_brief
+        story, previous = self.research_context(story_id)
         require_safe_story(story)
         if story.get("merged_into"): raise LibraryConflict("story was merged; export its destination instead")
         urls = list(dict.fromkeys(s["url"] for s in story.get("sources", []))) or [story["url"]]
         return {"schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": story["editorial"]["status"] == "approved", "source_urls": urls,
-                "platform_approvals": story["editorial"]["platforms"],
+                "platform_approvals": story["editorial"]["platforms"], "brief": build_brief(story, previous),
                 "videobot": {"action": "inspect", "urls": urls,
                     "instructions": "Paste these source URLs into VideoBot Inspect URLs, review discovered media, then choose what to queue. No media availability or reuse permission is implied."},
                 "rights": "unknown; review each source before reuse", "publishing": "manual only"}
@@ -230,7 +246,7 @@ def write_package(payload, parent):
         for key in sorted(FIELDS): parts += ["\n## " + key, drafts.get(key, "")]
         parts += ["\n## Research notes", state["notes"], "\n## Sources", "\n".join(payload["source_urls"]),
                   "\nMedia rights remain unknown. Paste sources.txt into VideoBot Inspect URLs, review discovered media, then choose what to queue. No downloading or posting was performed."]
-        files = {"research.json": json.dumps(payload, indent=2, ensure_ascii=False), "sources.txt": "\n".join(payload["source_urls"]) + "\n", "posts.md": "\n\n".join(parts)}
+        files = {"brief.md": payload["brief"]["markdown"], "research.json": json.dumps(payload, indent=2, ensure_ascii=False), "sources.txt": "\n".join(payload["source_urls"]) + "\n", "posts.md": "\n\n".join(parts)}
         for name, text in files.items():
             path = staging / name
             path.write_text(text, encoding="utf-8"); path.chmod(0o600)

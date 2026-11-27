@@ -10,7 +10,7 @@ Save the current filters as a named watchlist. Muting a source hides a story onl
 
 Default ordering is newest recorded revision. Review priority is a transparent heuristic: five points per source link (capped at five links), fifteen for flagged disagreement, and ten for a correction. It is not a credibility, independence or truth score. This is story ordering, not an automatically researched briefing.
 
-Select a story and choose **Open story and drafts**. Story shows the supplied summary and original HTTP(S) links; History exposes retained revisions. Quality notes distinguish provider assessments, unknown media rights and unverified source independence. The library reloads when the editor closes.
+Select a story and choose **Open story and drafts**. Story shows the supplied summary and original HTTP(S) links; History exposes retained revisions. Brief organizes source evidence, changes, unknowns and suggested follow-up from the saved version; see [editorial briefs](EDITORIAL_BRIEFS.md). Quality notes distinguish provider assessments, unknown media rights and unverified source independence. The library reloads when the editor closes.
 
 ## Draft and approve
 
@@ -26,7 +26,8 @@ X uses the packaged twitter-text weighted parser and a 280-character ceiling; th
 
 **Export saved research package** exports the last saved version, not unsaved editor contents. Each export creates its own `Research-<UUID>` directory containing:
 
-- `research.json`: current story, provenance, editorial state, per-platform approvals, revision and source URLs.
+- `research.json`: current story, provenance, editorial state, per-platform approvals, revision, source URLs and a structured brief.
+- `brief.md`: source-linked editorial brief from the same database snapshot.
 - `posts.md`: saved platform drafts and their approval states, narration starter, notes and rights reminders.
 - `sources.txt`: one original source URL per line.
 
@@ -45,6 +46,7 @@ Use the same bearer token as other bridge routes. All JSON responses are objects
 | `/v1/library/settings` | POST | `{kind: "search" or "mute", name, value}`; null deletes; searches store filter objects; mutes use true |
 | `/v1/library/editorial?id=ID` | GET | `story` object with `editorial`, `review_priority`, `quality_notes` |
 | `/v1/library/editorial?id=ID` | POST | Revision-bound change object below; returns updated `story` |
+| `/v1/library/brief?id=ID` | GET | Source-linked editorial brief; no fetch/model call |
 | `/v1/library/export?id=ID` | GET | Research JSON payload; does not write server files |
 
 Boolean query values must be `true`/`false`. Sort is `recent`/`priority`. Limit is 1–100 (default 50), offset 0–100000. Responses include `next_offset` or null. Offset pagination is for interactive browsing and may shift during ingestion; durable agent delivery uses the event cursor instead. Unknown query fields are rejected.
@@ -61,6 +63,7 @@ Set `AGENT_NEWSBOT_HOME` to the service's data folder when it differs from the d
 agent-newsbot library --entity NASA --desk science --sort priority
 agent-newsbot library --bookmarked --limit 25
 agent-newsbot editorial STORY_ID
+agent-newsbot brief STORY_ID
 agent-newsbot editorial STORY_ID --changes change.json
 agent-newsbot preferences
 agent-newsbot preferences --changes watchlist.json

@@ -292,7 +292,7 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
         return hmac.compare_digest(auth.encode('utf-8'), expected_bearer.encode('utf-8')) or hmac.compare_digest(alt.encode('utf-8'), STATE.token.encode('utf-8'))
 
     def _library(self, method, parsed):
-        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/repairs", "/v1/consumers"}
+        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs", "/v1/consumers"}
         if parsed.path not in paths:
             self._send(404, {"error": "not found"}); return
         if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs", "/v1/consumers"}):
@@ -322,6 +322,9 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
             elif parsed.path == "/v1/library": result = STATE.stories.library(query)
             elif parsed.path == "/v1/library/settings":
                 result = STATE.stories.library_settings(body.get("kind"), body.get("name"), body.get("value"), write=method == "POST")
+            elif parsed.path == "/v1/library/brief":
+                if set(query) != {"id"} or not query["id"]: raise ValueError("id is required")
+                result = STATE.stories.research_brief(query["id"])
             elif parsed.path == "/v1/library/export": result = STATE.stories.research_export(query.get("id", ""))
             else:
                 story = STATE.stories.save_editorial(query.get("id", ""), body) if method == "POST" else STATE.stories.editorial(query.get("id", ""))

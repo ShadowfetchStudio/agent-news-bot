@@ -30,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     library.add_argument("--bookmarked", action="store_true")
     library.add_argument("--include-muted", action="store_true")
     library.add_argument("--include-merged", action="store_true")
+    brief = sub.add_parser("brief", help="Read a source-linked editorial brief from retained research; no fetching or model call")
+    brief.add_argument("id")
     editorial = sub.add_parser("editorial", help="Read editorial state or save an explicit revision-bound change file")
     editorial.add_argument("id"); editorial.add_argument("--changes")
     preferences = sub.add_parser("preferences", help="List watchlists/mutes or apply a JSON preference change")
@@ -76,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd in ("library", "editorial", "preferences", "export-research", "consumers", "repairs"):
+    if args.cmd in ("library", "brief", "editorial", "preferences", "export-research", "consumers", "repairs"):
         from pathlib import Path
         import sqlite3
         from .config import HOME
@@ -121,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
                     except (OSError, http.client.HTTPException) as exc:
                         raise ValueError("Repair service unavailable or connection interrupted. Start the service, check the operation receipt, then retry the SAME change file.") from exc
                     finally: connection.close()
+            elif args.cmd == "brief":
+                result = journal.research_brief(args.id)
             elif args.cmd == "editorial":
                 result = journal.save_editorial(args.id, change) if change is not None else journal.editorial(args.id)
                 if result is None: raise LookupError("story not found")
