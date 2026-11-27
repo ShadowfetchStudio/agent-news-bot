@@ -101,6 +101,10 @@ final class NewsEngine: ObservableObject {
 
     func start() {
         guard !started else { return }
+        guard !AppPaths.recoveryIncomplete(in: AppPaths.support) else {
+            status = "This recovery folder is incomplete. Restore into a new folder before opening it."
+            return
+        }
         started = true
         if let selectedDesk, !settings.enabledDesks.contains(selectedDesk) { self.selectedDesk = nil }
         restoreSnapshot()
@@ -201,6 +205,10 @@ final class NewsEngine: ObservableObject {
     }
 
     func fetchFresh() async {
+        guard !AppPaths.recoveryIncomplete(in: AppPaths.support) else {
+            status = "Fetching is disabled for an incomplete recovery folder. Restore into a new folder."
+            return
+        }
         guard settings.setupCompleted else { status = "Complete setup before fetching."; return }
         guard !isFetching else { return }
         isFetching = true

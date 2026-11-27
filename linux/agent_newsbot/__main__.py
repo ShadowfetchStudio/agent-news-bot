@@ -8,8 +8,17 @@ import os
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Recovery remains available when runtime configuration or third-party
+    # dependencies are broken. Explicit paths avoid activating the current home.
+    recovery_commands = {"backup", "verify-backup", "restore-research"}
+    raw = sys.argv[1:] if argv is None else argv
+    if raw and raw[0] in recovery_commands:
+        from .recovery import main as recovery_main
+        return recovery_main(raw)
     parser = argparse.ArgumentParser(prog="agent-newsbot")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    for name in sorted(recovery_commands):
+        sub.add_parser(name, help="Research recovery into a new folder; use " + name + " --help")
     sub.add_parser("serve", help="Run the localhost API and periodic fetch loop")
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
     sub.add_parser("test-worldmonitor", help="Test configured World Monitor access without saving stories (reads one digest)")

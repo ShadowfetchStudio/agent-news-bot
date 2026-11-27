@@ -32,7 +32,15 @@ enum AppPaths {
     static var seenDB: URL { support.appendingPathComponent("seen.sqlite") }
     static var tokenFile: URL { support.appendingPathComponent("bridge.token") }
 
+    static func recoveryIncomplete(in folder: URL) -> Bool {
+        ["INCOMPLETE.json", "RECOVERY_INCOMPLETE.json"].contains { marker in
+            var info = stat()
+            return lstat(folder.appendingPathComponent(marker).path, &info) == 0
+        }
+    }
+
     static func prepareDatabase(_ url: URL) throws {
+        guard !recoveryIncomplete(in: url.deletingLastPathComponent()) else { throw CocoaError(.fileReadCorruptFile) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let fd = open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK, mode_t(0o600))
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }

@@ -54,6 +54,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [x] Feed coverage/last-success/backoff, verified replacement sources.
 - [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
+  - Research-only backup/verification/new-folder restore is implemented and tested below. Full configuration/export recovery and consumer-aware retention remain separate; the broader item stays open.
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
 - [ ] Private file permissions, dependency constraints and vulnerability scan.
 - [x] Total provider deadline and circuit breaker.
@@ -247,3 +248,17 @@ Final setup-batch verification: the rebuilt Apple Silicon app passed strict sign
 Source-history retention is still part of the broader maintenance work. This closes the source health/backoff/replacement and provider-bound/circuit checkboxes, not the full release, recovery/load, editorial, accessibility, real-provider or final artifact gates.
 
 Final source-health UI verification: stable identity and accessibility groups correctly exposed the newly inserted fourth row after Reload, without stale aggregate text. The final Apple Silicon build passed without warnings and strict signature verification passed. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-health-ui-gwi1mk51/verification.json`. Test app stopped and isolated preferences removed. This is scoped accessibility-tree verification, not a complete VoiceOver walkthrough.
+
+## Research recovery batch
+
+- Added standard-library-only `backup`, `verify-backup`, and `restore-research` commands, accessible through the installed Linux CLI or the helper packaged in the native Mac app. Explicit homes/destinations work even with invalid app configuration or unavailable runtime packages. Recovery requires Python 3.10+; ordinary native Mac use does not.
+- SQLite online backup includes committed WAL records and excludes uncommitted work. The private, versioned manifest records per-file SHA-256/bytes/table counts and an explicit per-database consistency boundary. Verification checks integrity, schema/JSON/references/checkpoints and rejects unexpected sidecars, links, incomplete folders and tampering. Source files are not replaced.
+- Restore requires a new folder, verifies copied bytes again, clears probe/consumer leases, advances backed-up generations and resets offered positions to acknowledged cursors. The recovery receipt fingerprints the resulting files. Credentials, configuration, exported snapshots/files and downstream inboxes/outboxes are explicitly excluded. Reconnecting older consumer checkpoints requires reconciliation; recovery does not promise exactly-once external effects or fence every later generation.
+- Interrupted work retains an incomplete marker. Native/Python database access refuses incomplete homes; native startup/fetch reports the problem. No automatic deletion of partial folders or replacement of the live app/service occurs. Byte/time bounds and a free-space reserve fail visibly.
+- Final local validation: **317 passed on macOS; native Pop!_OS 176 passed / 141 Mac-only skips**. The 22 recovery cases cover both database runtimes, WAL consistency, credentials excluded, preserved drafts/preferences/revisions, leases/cursors, existing folders, tampering, schema/JSON/orphans, deadlines, byte limits, changed files during restore, incomplete-home protection and standalone/CLI operation without site packages. The earlier source-health commit also passed all three GitHub CI jobs (Mac: 295; Linux: 156 passed / 139 skips).
+- Apple Silicon app rebuilt without warnings and passed strict ad-hoc signature verification. Its packaged helper hash matches source and successfully verified the independent load fixture. This is not notarization or a final release artifact.
+- Bounded synthetic recovery trial: 3,000 stories and 3,000 events, 52,789,248 database bytes; Mac backup 0.102 s, verify 0.046 s, restore 0.153 s. An acknowledged cursor of 1 retained lag 2,999 after restore. Measurement: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-recovery-load-02ah7ooi/measurement.json`. These warm local timings do not establish months-long collection throughput, retention safety or slow-disk performance.
+
+This closes the research-data recovery portion only. Consumer-safe pruning, broader configuration/export recovery and sustained storage/load behavior remain open, along with editorial enhancements and final distribution/integration gates.
+
+Recovery packaging check: a development wheel built through an isolated build backend, installed into a new venv with no runtime dependencies, and its CLI verified the 3,000-story archive from `/tmp` with no PYTHONPATH and an intentionally missing provider config. The native packaged helper SHA-256 matches source (`770f97312e28d9b045342578bd3cae95145282be6c18c172d207824c5384a1cf`). No production installation was replaced.

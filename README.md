@@ -150,6 +150,8 @@ alternate reports remain visible. Multiple desk memberships and disagreement fla
 See [the story model and migration contract](docs/STORY_MODEL.md) for selection rules and limitations.
 
 Consumer recovery now includes backlog/acknowledgement status, history/date/now starting points, explicit replay and optional worker leases. Event responses carry a generation to fence stale acknowledgements after resets. See [consumer recovery and the idempotent reference worker](docs/CONSUMER_RECOVERY.md) before using these controls with an existing automation.
+
+Research backups now have explicit `backup`, `verify-backup` and `restore-research` commands. They preserve the shared Mac/Linux journal and optional caches using SQLite snapshots, verify hashes/integrity and restore only into a new folder. Credentials, configuration, exports and downstream agent state are separate; old consumer checkpoints need reconciliation before reconnecting. The native app includes the same standalone helper (Python 3.10+ required only for recovery). See [research recovery and its limits](docs/RESEARCH_RECOVERY.md).
 Stories and events currently remain until explicitly managed; automated retention is a release task.
 
 `GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.
