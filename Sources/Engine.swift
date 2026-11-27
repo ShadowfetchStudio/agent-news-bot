@@ -118,7 +118,7 @@ final class NewsEngine: ObservableObject {
             return try await self.fetchForBridge()
         }
         reloadBridgeCredential()
-        Task { await refreshAgents() }
+        if settings.setupCompleted { Task { await refreshAgents() } }
         configureAutomaticRefresh()
     }
 
@@ -163,7 +163,7 @@ final class NewsEngine: ObservableObject {
     func configureAutomaticRefresh() {
         autoRefreshTask?.cancel()
         autoRefreshTask = nil
-        guard settings.autoRefresh else { return }
+        guard settings.setupCompleted && settings.autoRefresh else { return }
         let delay = UInt64(min(120, max(5, settings.refreshMinutes))) * 60 * 1_000_000_000
         autoRefreshTask = Task { [weak self] in
             // Opening/reopening windows must not create overlapping refresh loops.
@@ -200,6 +200,7 @@ final class NewsEngine: ObservableObject {
     }
 
     func fetchFresh() async {
+        guard settings.setupCompleted else { status = "Complete setup before fetching."; return }
         guard !isFetching else { return }
         isFetching = true
         snapshot.setFetching(true)

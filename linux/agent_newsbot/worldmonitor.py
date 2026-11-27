@@ -25,6 +25,66 @@ MAX_BYTES = 4 * 1024 * 1024
 HTTP_DEADLINE = 20.0
 
 
+class DiagnosticError(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def diagnosis(code):
+    messages = {
+        "configuration": "Use an HTTPS server origin, or HTTP on localhost, with no path, query or credentials. Check the edition and API key format.",
+        "schema": "The server did not return a compatible news digest. Check its API version and origin.",
+        "response_too_large": "The digest exceeds the 4 MiB limit. Choose a narrower edition or contact the provider.",
+        "timeout": "World Monitor exceeded its request deadline. Check the server and retry later.",
+        "tls": "World Monitor TLS validation failed. Fix the server certificate; verification remains enabled.",
+        "network": "Cannot reach World Monitor. Check the server, network and port.",
+    }
+    if code.startswith("http_"):
+        status = int(code[5:])
+        detail = {401: "authentication failed. Check the API key.",
+                  403: "access denied. Check your account or server permissions.",
+                  404: "digest endpoint not found. Check the server origin and API compatibility.",
+                  429: "rate limited. Wait before retrying and check the provider's quota."}.get(status)
+        if detail is None:
+            detail = ("redirect refused to protect your key. Enter the final authorized server origin." if 300 <= status < 400 else
+                      "provider unavailable. Retry later; direct sources remain independent." if 500 <= status < 600 else
+                      "request rejected. Check the provider configuration.")
+        message = f"World Monitor HTTP {status}: {detail}"
+    else:
+        if code not in messages: code = "network"
+        message = messages[code]
+    return {"code": code, "message": message, "succeeded": False}
+
+
+def retrieve(base, variant, key, lookback=12, limit=20):
+    try:
+        base = validate_base_url(base)
+        if variant not in VARIANTS or len(base.encode()) > 4096 or len(key.encode()) > 8192 or any(not 32 <= ord(c) <= 126 for c in key):
+            raise ValueError()
+    except ValueError:
+        raise DiagnosticError("configuration") from None
+    try:
+        status, payload = bounded_request(base, variant, key)
+        if status != 200: raise DiagnosticError(f"http_{status}")
+        try: return parse_digest(payload, lookback, limit)
+        except (ValueError, TypeError, KeyError): raise DiagnosticError("schema") from None
+    except subprocess.TimeoutExpired: raise DiagnosticError("timeout") from None
+    except DiagnosticError: raise
+    except (OSError, subprocess.SubprocessError): raise DiagnosticError("network") from None
+    except (ValueError, KeyError, TypeError): raise DiagnosticError("schema") from None
+
+
+def test_connection(base, variant, key):
+    from .coverage import summary
+    try:
+        results = retrieve(base, variant, key)
+        state = summary([c for result in results for c in result.source_checks])["state"]
+        return {"code": "connected", "succeeded": True,
+                "message": f"Compatible digest received. Coverage: {state}. This checks access and format, not factual accuracy or content rights. No stories saved."}
+    except DiagnosticError as error: return diagnosis(error.code)
+
+
 def bounded_request(base, variant, key):
     if len(key)>8192 or len(base)>4096: raise ValueError("configuration too long")
     request=json.dumps({"url":base+"/api/news/v1/list-feed-digest","variant":variant,"key":key}).encode()
@@ -33,15 +93,17 @@ def bounded_request(base, variant, key):
     result=subprocess.run([sys.executable,"-I",str(worker)],input=request,capture_output=True,timeout=HTTP_DEADLINE,env=env)
     if result.returncode!=0 or len(result.stdout)>MAX_BYTES*2: raise ValueError("request worker failed")
     response=json.loads(result.stdout)
-    if "error" in response: raise ValueError("request failed")
+    if "error" in response: raise DiagnosticError(response["error"] if response["error"] in ("tls", "timeout", "response_too_large") else "network")
     if response.get("status")!=200: return response.get("status"),None
     body=base64.b64decode(response["body"],validate=True)
-    if len(body)>MAX_BYTES: raise ValueError("oversized response")
+    if len(body)>MAX_BYTES: raise DiagnosticError("response_too_large")
     return 200,json.loads(body)
 
 
 def validate_base_url(base: str) -> str:
+    if not safe_article_url(base): raise ValueError("invalid origin")
     p = urlsplit(base)
+    if p.port is not None and not 1 <= p.port <= 65535: raise ValueError("invalid port")
     local = p.hostname in ("localhost", "127.0.0.1", "::1")
     if (not p.hostname or p.username or p.password or p.query or p.fragment
             or p.path not in ("", "/") or p.scheme not in ("http", "https")
@@ -116,16 +178,9 @@ def fetch(lookback: float, limit: int) -> list[DeskResult]:
     if os.getenv("AGENT_NEWSBOT_WORLDMONITOR_ENABLED", "").lower() not in ("1", "true", "yes"):
         return []
     try:
-        base = validate_base_url(os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000"))
-        variant = os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full")
-        if variant not in VARIANTS:
-            raise ValueError("invalid variant")
-        key = os.getenv("AGENT_NEWSBOT_WORLDMONITOR_KEY", "")
-        # A child owns the request so a trickling body or blocked resolver cannot exceed the total deadline.
-        status,payload=bounded_request(base,variant,key)
-        if status!=200:
-            return [DeskResult("world", [], source_errors=[f"World Monitor HTTP {status}"], source_checks=[check("World Monitor digest", "unavailable", f"HTTP {status}", "worldmonitor")])]
-        return parse_digest(payload, lookback, limit)
-    except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError):
-        # Do not log request URLs, credential-bearing headers, or response bodies.
-        return [DeskResult("world", [], source_errors=["World Monitor unavailable or invalid response/configuration"], source_checks=[check("World Monitor digest", "unavailable", "Request, configuration or parsing failed", "worldmonitor")])]
+        return retrieve(os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000"),
+                        os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full"),
+                        os.getenv("AGENT_NEWSBOT_WORLDMONITOR_KEY", ""), lookback, limit)
+    except DiagnosticError as error:
+        message = diagnosis(error.code)["message"]
+        return [DeskResult("world", [], source_errors=[message], source_checks=[check("World Monitor digest", "unavailable", message, "worldmonitor")])]

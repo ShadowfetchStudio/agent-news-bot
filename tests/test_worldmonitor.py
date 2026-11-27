@@ -94,7 +94,7 @@ def test_redirect_does_not_forward_credentials(monkeypatch):
         monkeypatch.setenv("AGENT_NEWSBOT_WORLDMONITOR_ENABLED", "true")
         monkeypatch.setenv("AGENT_NEWSBOT_WORLDMONITOR_URL", url)
         monkeypatch.setenv("AGENT_NEWSBOT_WORLDMONITOR_KEY", "fixture-secret")
-        assert worldmonitor.fetch(12, 20)[0].source_errors == ["World Monitor HTTP 302"]
+        assert worldmonitor.fetch(12, 20)[0].source_errors == [worldmonitor.diagnosis("http_302")["message"]]
         assert len(calls) == 1
 
 
@@ -218,7 +218,7 @@ def test_swift_connector_http_and_redirect(swift_harness):
         assert calls[0][1] == "test-fixture-key"
         assert "variant=tech" in calls[0][0]
     with provider({}, 302, True) as (url, calls):
-        assert swift(swift_harness, "fetch", url)["errors"] == ["World Monitor HTTP 302"]
+        assert swift(swift_harness, "fetch", url)["errors"] == [worldmonitor.diagnosis("http_302")["message"]]
         assert len(calls) == 1
 
 
@@ -1910,3 +1910,62 @@ def test_capability_app_version_matches_packaged_versions():
     from agent_newsbot.api_contract import APP_VERSION
     assert APP_VERSION == re.search(r'^version = "([^"]+)"', (ROOT/'linux/pyproject.toml').read_text(), re.M)[1]
     assert APP_VERSION == re.search(r'CFBundleShortVersionString</key><string>([^<]+)', (ROOT/'build.sh').read_text())[1]
+
+
+def test_setup_migration_preserves_existing_choices_and_pending_restart(swift_harness):
+    assert swift(swift_harness, "setup-policy") == {
+        "fresh": False, "pending": False, "completed": True, "legacy": True,
+        "auto_refresh": False, "desks": 0, "origin": "https://existing.example"}
+
+
+@pytest.mark.parametrize("status,body,code", [
+    (200, {"categories": {}}, "connected"),
+    (200, {"categories": {}, "coverage": {"state": "stale"}}, "connected"),
+    (200, {"categories": []}, "schema"), (200, b"secret fixture-secret not-json", "schema"),
+    (401, {"error": "secret fixture-secret"}, "http_401"), (403, {}, "http_403"),
+    (404, {}, "http_404"), (429, {}, "http_429"), (503, {}, "http_503"), (302, {}, "http_302")])
+def test_worldmonitor_connection_diagnostics_match_runtimes(swift_harness, status, body, code):
+    with provider(body, status, redirect=status==302) as (url, calls):
+        native = swift(swift_harness, "wm-test", url)
+        python = worldmonitor.test_connection(url, "full", "fixture-secret")
+    assert native == python
+    assert native["code"] == code and native["succeeded"] == (code == "connected")
+    assert "fixture-secret" not in str(native)
+    assert len(calls) == 2 and all(c[1] == "fixture-secret" for c in calls)
+    if code == "connected" and body.get("coverage"): assert "stale" in native["message"]
+
+
+@pytest.mark.parametrize("url,variant,key", [
+    ("http://remote.example", "full", "secret"), ("https://example.com:0", "full", "secret"),
+    ("https://example.com:99999", "full", "secret"), ("https://example.com/api", "full", "secret"),
+    ("https://example.com", "missing", "secret"), ("https://example.com", "full", "secret\nheader"),
+    ("https://example.com", "full", "é"), ("https://example.com", "full", "x" * 8193)])
+def test_connection_configuration_rejected_before_network(swift_harness,url,variant,key):
+    expected=worldmonitor.diagnosis("configuration")
+    assert worldmonitor.test_connection(url,variant,key) == expected
+    assert swift(swift_harness,"wm-test",url,variant,key) == expected
+
+
+def test_worldmonitor_cli_test_without_ingestion(tmp_path):
+    with provider({"categories": {}}) as (url,calls):
+        env=dict(os.environ, PYTHONPATH=str(ROOT/"linux"), AGENT_NEWSBOT_HOME=str(tmp_path),
+                 AGENT_NEWSBOT_WORLDMONITOR_URL=url, AGENT_NEWSBOT_WORLDMONITOR_KEY="fixture-secret")
+        result=subprocess.run([sys.executable,"-m","agent_newsbot","test-worldmonitor"],env=env,cwd=tmp_path,capture_output=True,text=True,timeout=25)
+        assert result.returncode == 0,result.stderr
+        assert json.loads(result.stdout)["succeeded"] is True
+        assert len(calls)==1 and calls[0][1]=="fixture-secret"
+        assert not list(tmp_path.rglob("*.sqlite")) and not list(tmp_path.rglob("latest.json"))
+    env["AGENT_NEWSBOT_WORLDMONITOR_URL"]="http://remote.example"
+    result=subprocess.run([sys.executable,"-m","agent_newsbot","test-worldmonitor"],env=env,cwd=tmp_path,capture_output=True,text=True,timeout=25)
+    assert result.returncode==1 and json.loads(result.stdout)["code"]=="configuration"
+
+
+def test_python_connection_transport_diagnostics(monkeypatch):
+    import requests
+    for code in ("tls", "timeout", "response_too_large", "network"):
+        def fail(*args): raise worldmonitor.DiagnosticError(code)
+        monkeypatch.setattr(worldmonitor,"bounded_request",fail)
+        assert worldmonitor.test_connection("https://example.com","full","") == worldmonitor.diagnosis(code)
+    def timeout(*args): raise subprocess.TimeoutExpired("worker",20)
+    monkeypatch.setattr(worldmonitor,"bounded_request",timeout)
+    assert worldmonitor.test_connection("https://example.com","full","")["code"]=="timeout"

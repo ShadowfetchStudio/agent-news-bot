@@ -22,9 +22,17 @@ final class SettingsStore: ObservableObject {
     @Published var worldMonitorVariant: String
     @Published var marketSymbols: String
 
-    private let defaults = UserDefaults(suiteName: AppPaths.bundleId) ?? .standard
+    @Published var setupCompleted: Bool
+    private let defaults: UserDefaults
 
-    private init() {
+    init(defaults: UserDefaults = UserDefaults(suiteName: AppPaths.bundleId) ?? .standard) {
+        self.defaults = defaults
+        // Existing preferences identify an upgrade. An explicit false survives restarts
+        // during unfinished onboarding, even after save() has written other defaults.
+        setupCompleted = defaults.object(forKey: "setupCompleted") as? Bool
+            ?? ["enabledDesks", "autoRefresh", "lookbackHours", "worldMonitorEnabled", "bridgePort", "hermesAPIURL"]
+                .contains { defaults.object(forKey: $0) != nil }
+
         autoRefresh = defaults.object(forKey: "autoRefresh") as? Bool ?? true
         refreshMinutes = min(120, max(5, defaults.object(forKey: "refreshMinutes") as? Int ?? 15))
         worldMonitorEnabled = defaults.bool(forKey: "worldMonitorEnabled")
@@ -48,6 +56,7 @@ final class SettingsStore: ObservableObject {
     }
 
     func save() {
+        defaults.set(setupCompleted, forKey: "setupCompleted")
         defaults.set(autoRefresh, forKey: "autoRefresh")
         defaults.set(refreshMinutes, forKey: "refreshMinutes")
         defaults.set(worldMonitorEnabled, forKey: "worldMonitorEnabled")

@@ -12,6 +12,12 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Setup status") {
+                Label(settings.setupCompleted ? "Source setup saved" : "First-run setup pending", systemImage: settings.setupCompleted ? "checkmark.circle" : "circle")
+                Label(engine.bridgeReady ? "Local bridge listening" : "Bridge offline — see credential and port controls below", systemImage: engine.bridgeReady ? "checkmark.circle" : "exclamationmark.triangle")
+                Text("Current coverage: \(engine.coverageState). Open Coverage in the desk to inspect individual source results. Agent connections are optional and require their own tests.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Freshness") {
                 Toggle("Refresh automatically while the app is running", isOn: $settings.autoRefresh)
                 Stepper("Refresh every \(settings.refreshMinutes) minutes", value: $settings.refreshMinutes, in: 5...120, step: 5)
@@ -28,11 +34,7 @@ struct SettingsView: View {
             }
             Section("World Monitor (optional)") {
                 Toggle("Enable World Monitor", isOn: $settings.worldMonitorEnabled)
-                TextField("Server URL", text: $settings.worldMonitorURL)
-                Picker("Edition", selection: $settings.worldMonitorVariant) {
-                    ForEach(WorldMonitorClient.variants, id: \.self) { Text($0).tag($0) }
-                }
-                SecureField("API key (if required)", text: $worldMonitorKey)
+                WorldMonitorConnectionView(base: $settings.worldMonitorURL, variant: $settings.worldMonitorVariant, key: $worldMonitorKey)
                 Text("Connect your own server or a licensed hosted API. Existing news sources work independently. HTTP is accepted only on loopback; use HTTPS for remote servers.")
                     .font(.caption).foregroundStyle(.secondary)
             }

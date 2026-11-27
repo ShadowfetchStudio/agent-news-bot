@@ -22,6 +22,11 @@ work independently. See [World Monitor integration and durable delivery](docs/wo
 
 ---
 
+On first macOS launch, choose direct sources or add a self-hosted/authorized World Monitor digest,
+select desks and choose automatic refresh. Existing preferences are preserved on upgrade. Settings
+includes an explicit connection test using the entered values; Linux provides
+`agent-newsbot test-worldmonitor`. Tests do not ingest stories. See [setup and diagnostics](docs/worldmonitor.md).
+
 ## Table of contents
 
 - [Who it's for](#who-its-for)

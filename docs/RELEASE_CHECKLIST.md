@@ -37,7 +37,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 
 ## Setup and everyday use
 
-- [ ] First-run mode selection, connection test and actionable provider errors.
+- [x] First-run mode selection, connection test and actionable provider errors.
 - [ ] Safe observable credential storage, failure preservation and rotation.
 - [x] Supported private Linux config and service wiring.
 - [ ] macOS automatic refresh and restored batch.
@@ -218,3 +218,16 @@ This closes R03 and the manual grouping checkbox, not the broader release object
 - A Linux development wheel was built and installed into `/tmp/anb-contract-installed`; from outside the checkout, its packaged capability module and server imported with the expected app version. This is package inclusion evidence, not the final public release artifact.
 
 First-run setup, source resilience, maintenance/retention/load, deeper editorial work, remaining accessibility/real integrations and final release deliverables remain open in the checklist.
+
+
+## First-run setup and connection diagnostics
+
+- New Mac installations choose direct sources alone or direct sources plus their own/authorized hosted World Monitor API. They select desks and automatic refresh. News fetch and agent discovery wait for saved setup. Existing preferences migrate without reset; explicitly unfinished setup survives a restart. Keychain failures preserve credentials and block enabled-connector completion; direct-only setup leaves the key unchanged.
+- Settings and first-run setup offer an explicit digest connection test. It uses entered values without saving credentials or ingesting research, reports coverage separately from connectivity and clears its session result on edits. Linux exposes the same test through `agent-newsbot test-worldmonitor` with JSON and success/failure exit codes. No CLI key argument is needed.
+- Both adapters distinguish invalid configuration, HTTP authentication/permissions/missing endpoints/rate limits/provider errors/redirects, TLS validation, deadlines, oversized responses and incompatible payloads. Raw provider errors and credentials are not displayed. Python World Monitor no longer inherits environment proxies. Existing byte/deadline/no-redirect bounds remain intact.
+- Automated validation before the final layout-only adjustment: **251 passed on macOS; 133 passed / 118 native-Mac skips on Pop!_OS**. Migration fixtures verify clean, unfinished, completed and existing configurations. Real local HTTP tests compare both runtimes for partial/empty/stale digests and error responses, verify key redaction and no redirect follow, and reject invalid configuration before network access. The Linux CLI test verifies no research/snapshot creation.
+- Actual built-app walkthrough: inspected the first-run mode choices, local 401 guidance, compatible partial coverage, timestamp, result invalidation after an origin edit, successful setup completion and Settings status at 520 x 592. Two explicit provider test requests produced no story schema or exported snapshot. Automatic refresh remained off in the final isolated fixture; its saved setup and origin were verified. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-setup-ui-rs0a21e6/verification.json`. Test app stopped and isolated preferences removed. A subsequent layout adjustment removes an empty form row; final validation is recorded below.
+
+Persistent source health/backoff, backup/restore/retention/load, richer editorial briefs/platform approvals, full accessibility/real integrations and final release packages remain open.
+
+Final setup-batch verification: the rebuilt Apple Silicon app passed strict signature verification without compiler warnings. The final provider form was visually inspected with the empty row removed; 401 guidance and result clearing after editing still worked. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-setup-ui-3zii2o8r/verification.json`. The isolated app/preferences were cleaned up. Final focused Mac connection/migration/transport checks: **25 passed**; native Linux CLI/diagnostics/deadline checks after the worker refinement: **3 passed**. These checks do not claim real hosted-provider access or full VoiceOver acceptance.

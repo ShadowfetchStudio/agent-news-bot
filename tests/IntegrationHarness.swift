@@ -4,6 +4,32 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "setup-policy" {
+            let values = await MainActor.run { () -> [String: Any] in
+                let name = "ai.shadowfetch.agentnewsbot.setup-test." + UUID().uuidString
+                let defaults = UserDefaults(suiteName: name)!
+                defer { defaults.removePersistentDomain(forName: name) }
+                let fresh = SettingsStore(defaults: defaults)
+                let first = fresh.setupCompleted
+                fresh.save()
+                let pending = SettingsStore(defaults: defaults).setupCompleted
+                fresh.setupCompleted = true; fresh.save()
+                let completed = SettingsStore(defaults: defaults).setupCompleted
+                defaults.removePersistentDomain(forName: name)
+                defaults.set(false, forKey: "autoRefresh")
+                defaults.set([String](), forKey: "enabledDesks")
+                defaults.set("https://existing.example", forKey: "worldMonitorURL")
+                let legacy = SettingsStore(defaults: defaults)
+                return ["fresh": first, "pending": pending, "completed": completed,
+                        "legacy": legacy.setupCompleted, "auto_refresh": legacy.autoRefresh,
+                        "desks": legacy.enabledDesks.count, "origin": legacy.worldMonitorURL]
+            }
+            try output(values); return
+        }
+        if args[1] == "wm-test" {
+            let result = await WorldMonitorClient.test(base: args[2], key: args.count > 4 ? args[4] : "fixture-secret", variant: args.count > 3 ? args[3] : "full")
+            try output(["code": result.code, "message": result.message, "succeeded": result.succeeded]); return
+        }
         if args[1] == "snapshot-save" {
             do {
                 let directory = URL(fileURLWithPath: args[2])

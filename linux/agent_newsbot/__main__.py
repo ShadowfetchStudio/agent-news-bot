@@ -12,6 +12,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve", help="Run the localhost API and periodic fetch loop")
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
+    sub.add_parser("test-worldmonitor", help="Test configured World Monitor access without saving stories (reads one digest)")
     sub.add_parser("status", help="Show last snapshot counts")
     library = sub.add_parser("library", help="Search retained research stories")
     for name in ("q", "entity", "desk", "source", "provider", "status", "sort", "limit", "offset"):
@@ -42,6 +43,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from .config import SHARED
+    if args.cmd == "test-worldmonitor":
+        from .worldmonitor import test_connection
+        result = test_connection(os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000"),
+                                 os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full"),
+                                 os.getenv("AGENT_NEWSBOT_WORLDMONITOR_KEY", ""))
+        json.dump(result, sys.stdout, indent=2); sys.stdout.write("\n")
+        return 0 if result["succeeded"] else 1
     if args.cmd == "fetch":
         from .server import STATE
         snapshot = STATE.refresh()

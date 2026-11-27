@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var engine: NewsEngine
+    @ObservedObject private var settings = SettingsStore.shared
     @State private var showCoverage = false
     @State private var showLibrary = false
 
@@ -17,6 +18,9 @@ struct ContentView: View {
         }
         .background(Theme.bgDeep)
         .toolbar { toolbar }
+        .sheet(isPresented: Binding(get: { !settings.setupCompleted }, set: { _ in })) {
+            SetupView().environmentObject(engine).interactiveDismissDisabled()
+        }
         .sheet(isPresented: $showCoverage) { CoverageView().environmentObject(engine) }
         .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories, refreshSnapshot: engine.refreshRepairedSnapshot) }
     }

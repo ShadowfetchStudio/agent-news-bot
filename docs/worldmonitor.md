@@ -1,4 +1,4 @@
-# World Monitor integration — first version
+# World Monitor integration
 
 The optional connector ingests World Monitor's English feed digest into the existing desks. It
 retains source links, snippets, publication dates, category, location, provider assessments and
@@ -8,10 +8,24 @@ This feature does not install or start a World Monitor server, subscribe to a pl
 
 ## Configuration
 
-**macOS:** build the app with `./build.sh --arch arm64`, open the built bundle, then Settings →
+**macOS first launch:** choose direct sources alone, direct sources plus your own World Monitor
+server, or direct sources plus an authorized hosted API. Direct sources remain active in all
+three modes. Choose at least one desk and whether to refresh automatically. No news fetch or
+agent discovery starts until setup is saved. The loopback bridge can start before setup, but
+fetch requests cannot run until setup is completed. A connection test is optional and reads one
+digest without saving stories. Saving an enabled connector's edited key uses Keychain; a failed
+read/write keeps setup pending and preserves the existing key. Direct-only setup leaves the key
+unchanged. Existing installations retain their preferences and do not repeat setup. Unfinished
+setup stays unfinished after restart.
+
+**macOS Settings:** build the app with `./build.sh --arch arm64`, open the built bundle, then Settings →
 World Monitor. Enable the connector, set the server origin and edition, and enter a key if the
 server requires one. Use **Credentials → Save credential changes** to save the key to Keychain.
-Closing Settings saves ordinary preferences, but does not change credentials. Fetch Fresh performs a digest request. Source links and revision labels are visible
+Closing Settings saves ordinary preferences, but does not change credentials. **Test World Monitor
+connection** uses the values currently entered, including an unsaved key. It does not save that
+key: save credential changes before fetching with it. The result includes coverage and a session
+check timestamp; editing the origin, edition or key clears it. A compatible empty, partial or stale
+digest proves connectivity, not current complete reporting, factual verification or reuse rights. Fetch Fresh performs a digest request. Source links and revision labels are visible
 in the story inspector. JSON exports and both bridge APIs contain the source groups.
 
 **Linux:** add these environment settings to the service's private environment file:
@@ -31,8 +45,24 @@ Responses are bounded to 4 MiB. Each refresh makes one request with no automatic
 is surfaced as a warning and normal sources continue. Keep an interval appropriate for your plan.
 Both runtimes enforce a 20-second total resource deadline for this connector. Python uses an
 isolated request worker that is killed and reaped on expiry; a read-inactivity timeout alone would
-not bound a server that trickles data. Direct-source limits and persistent circuit breakers remain
+not bound a server that trickles data. Direct sources also have streaming/total-time bounds. Persistent circuit breakers remain
 separate work on the release checklist.
+
+### Connection diagnostics
+
+Linux: run `agent-newsbot test-worldmonitor` using the same private configuration as the
+service. It tests even when scheduled World Monitor ingestion is disabled, prints redacted JSON
+(`code`, `message`, `succeeded`) and exits 0 for a compatible digest or 1 on failure. It does not
+create research records, snapshots or consumer events. Tests on either platform make one request,
+which may count against the provider's quota; they do not start or install a provider.
+
+Both runtimes distinguish configuration errors, TLS validation, timeout, transport failure,
+oversized responses, incompatible JSON/schema, authentication (401), authorization (403), missing
+endpoint (404), rate limits (429), redirects and provider errors. They never echo server error
+bodies or credentials. Fix the server certificate instead of disabling TLS verification. A redirect
+is refused; configure the final authorized origin explicitly. Python does not inherit environment
+proxies for requests containing the World Monitor key. Connection results are not persistent source
+health history; last-success tracking and automatic backoff remain separate work.
 
 The connector calls `GET /api/news/v1/list-feed-digest?variant=tech&lang=en`, optionally with an
 `X-WorldMonitor-Key` header. Hosted origin: `https://api.worldmonitor.app`; use only with the
