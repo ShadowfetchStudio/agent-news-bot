@@ -10,7 +10,7 @@ Both platforms retain other eligible stories when a new report arrives in the sa
 
 ## Mac refresh controls
 
-Settings → Freshness controls automatic refresh while the app is running (enabled by default, every 15 minutes; configurable from 5–120 minutes). The first refresh begins after a two-second startup grace period. The interval runs after the previous attempt finishes. Fetch Fresh and HTTP jobs share the existing busy gate, so attempts do not overlap. Reopening the window does not initialize another engine or refresh loop. Closing Settings reapplies the schedule. Automatic refresh does not install a background login service; quitting the app stops it.
+Settings → Freshness controls automatic refresh while the app is running (enabled by default, every 15 minutes; configurable from 5–120 minutes). After first-run setup is complete, the first refresh begins after a two-second startup grace period. The interval runs after the previous attempt finishes. Fetch Fresh and HTTP jobs share the existing busy gate, so attempts do not overlap. Reopening the window does not initialize another engine or refresh loop. Closing Settings reapplies the schedule. Automatic refresh does not install a background login service; quitting the app stops it.
 
 The selected story remains selected if it is still in the refreshed display. No automatic agent handoff or posting is performed.
 

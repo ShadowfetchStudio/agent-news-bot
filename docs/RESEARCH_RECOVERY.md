@@ -4,7 +4,7 @@ The recovery tool saves the research journal, optional freshness cache and optio
 
 Included in `stories.sqlite`: stories, original provider observations, correction/event history, group-repair receipts, identity aliases, editorial drafts/notes/approval state, bookmarks, saved searches, saved-search alert subscriptions/inbox/read positions and version clock, source mutes and consumer checkpoints. `seen.sqlite` and `source-health.sqlite` are included when present. Research text and worker lease tokens in the backup are private data; keep the backup private.
 
-This is a **research backup**, not a full computer or application configuration backup. It excludes bridge tokens, Keychain secrets, Mac preferences, Linux config, exported files/snapshots, agent inboxes/outboxes and binaries. Save those separately using your normal private backup process. Media rights and editorial approval do not change through recovery.
+This is a **research backup**, not a full computer or application configuration backup. It excludes bridge tokens, Keychain secrets, Mac preferences, Linux config, exported files/snapshots, agent inboxes/outboxes and binaries. Use the [application archive workflow](APPLICATION_RECOVERY.md) to include configuration and selected export folders; bridge/Keychain credentials and independent agent state still require separate reconnection or backup. Media rights and editorial approval do not change through recovery.
 
 ## Create and verify
 
@@ -51,4 +51,4 @@ An interrupted/failed backup retains `INCOMPLETE.json`; a failed restore retains
 
 Unknown schemas, non-regular/linked files, malformed JSON, orphaned story references, invalid checkpoints, changed checksums and exhausted byte/time/disk limits fail visibly. Existing backups and libraries remain untouched. The tool does not automatically delete partial directories. Its schema version is intentionally strict; future schema changes need a corresponding recovery-tool update.
 
-Recovery itself performs no pruning. The separate [history-retention workflow](HISTORY_RETENTION.md) requires a saved plan and verified archive, protects consumer/editorial evidence and persists an explicit delivery boundary. Recovery preserves this optional boundary and remains compatible with older version-1 archives without it. Full configuration/export recovery, total storage limits and broader load validation remain separate release work.
+Recovery itself performs no pruning. The separate [history-retention workflow](HISTORY_RETENTION.md) requires a saved plan and verified archive, protects consumer/editorial evidence and persists an explicit delivery boundary. Recovery preserves this optional boundary and remains compatible with older version-1 archives without it. The [application archive workflow](APPLICATION_RECOVERY.md) adds configuration and selected export trees without automatic activation. Total storage limits and broader load validation remain separate release work.

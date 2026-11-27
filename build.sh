@@ -63,10 +63,10 @@ iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 cp "$PROJECT_DIR/linux/agent_newsbot/vendor/twitter-text.js" "$APP_DIR/Contents/Resources/"
 cp "$PROJECT_DIR/linux/agent_newsbot/vendor/"*-LICENSE.txt "$APP_DIR/Contents/Resources/"
-for helper in recovery maintenance retention; do
+for helper in recovery maintenance retention application_recovery; do
     cp "$PROJECT_DIR/linux/agent_newsbot/$helper.py" "$APP_DIR/Contents/Resources/"
 done
-cp "$PROJECT_DIR/docs/RESEARCH_RECOVERY.md" "$PROJECT_DIR/docs/HISTORY_RETENTION.md" "$PROJECT_DIR/docs/SAVED_SEARCH_ALERTS.md" "$APP_DIR/Contents/Resources/"
+cp "$PROJECT_DIR/docs/RESEARCH_RECOVERY.md" "$PROJECT_DIR/docs/HISTORY_RETENTION.md" "$PROJECT_DIR/docs/SAVED_SEARCH_ALERTS.md" "$PROJECT_DIR/docs/APPLICATION_RECOVERY.md" "$APP_DIR/Contents/Resources/"
 
 echo "==> Compiling ($ARCH)"
 SWIFT_SOURCES=()

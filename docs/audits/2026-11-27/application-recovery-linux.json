@@ -1,0 +1,15 @@
+{
+  "platform": "Linux-7.2.6-76070206-generic-x86_64-with-glibc2.39",
+  "fixture": "/tmp/anb-application-load-bmy9xl6v",
+  "scope": "Warm synthetic application-data trial; not a production machine recovery, secret-store recovery or slow-disk benchmark",
+  "stories": 200,
+  "events": 600,
+  "export_files": 128,
+  "export_bytes": 8650752,
+  "payload_bytes": 10494011,
+  "all_exports_and_config_equal": true,
+  "bridge_credential_excluded": true,
+  "backup_seconds": 0.26087931683287024,
+  "verify_seconds": 0.038265292067080736,
+  "restore_seconds": 0.3509617990348488
+}

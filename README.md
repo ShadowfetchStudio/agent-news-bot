@@ -71,21 +71,21 @@ Persistent source history and backoff are available in Coverage, `GET /v1/source
 - **Token-authenticated localhost bridge.** `GET /v1/fresh`, `/v1/desks`, `/v1/status`, and
   `POST /v1/fetch`, bound to `127.0.0.1` only, behind a bearer token that is generated on first run.
 - **Two runtimes, one contract.** Native macOS app *and* headless Linux daemon expose the same API.
-- **Live-desk carry-over (Linux).** If a desk produces nothing new this cycle, still-fresh items from
+- **Live-desk carry-over on both platforms.** If a desk produces nothing new this cycle, still-fresh items from
   the previous batch are retained so the desk never looks empty while it's simply current.
 
 ## The 14 desks & their sources
 
 | Desk | Source(s) | API key? |
 |------|-----------|----------|
-| `breaking` | NPR, BBC, NY Times, AP (RSS) | none |
+| `breaking` | NPR, BBC, NY Times (RSS) | none |
 | `politics` | NPR, BBC, NY Times, Politico, The Hill (RSS) | none |
-| `world` | BBC, NPR, NY Times, Al Jazeera, Deutsche Welle, AP (RSS) | none |
-| `business` | NPR, BBC, CNBC, Yahoo Finance, MarketWatch (RSS) | none |
+| `world` | BBC, NPR, NY Times, Al Jazeera, Deutsche Welle (RSS) | none |
+| `business` | NPR, BBC, CNBC, Federal Reserve releases, MarketWatch (RSS) | none |
 | `tech` | Ars Technica, The Verge, TechCrunch, Wired, BBC, The Register (RSS) | none |
 | `ai` | TechCrunch AI, Verge AI, MIT Tech Review, Simon Willison, Hugging Face, Google AI, NVIDIA, VentureBeat, arXiv cs.AI/cs.LG, Wired AI (RSS) | none |
 | `science` | NPR, BBC, NY Times, ScienceDaily, NASA (RSS) | none |
-| `health` | NPR, BBC, NY Times, Medical News Today (RSS) | none |
+| `health` | NPR, BBC, NY Times, National Cancer Institute releases (RSS) | none |
 | `entertainment` | BBC, Variety, Deadline, Hollywood Reporter (RSS) | none |
 | `sports` | NPR, BBC Sport, ESPN, Yahoo Sports (RSS) | none |
 | `markets` | Yahoo Finance chart API (configurable symbol list) | none |
@@ -108,6 +108,12 @@ flowchart TD
     Journal --> Snapshot[Fresh snapshot and exports]
     Journal --> Events[Per-consumer event delivery and acknowledgement]
     Journal --> History[Current story and revision lookup]
+    Journal --> Editorial[Library, briefs and revision-bound drafts]
+    Journal --> Alerts[Saved-search inbox and review queue]
+    Journal --> Recovery[Verified archives and explicit history maintenance]
+    Health[Persistent source health and backoff] --> Normalize
+    Editorial --> UI
+    Alerts --> UI
     Snapshot --> UI[Native Mac newsroom or Linux service]
     Events --> Agents[Agents and research workflows]
     History --> UI
@@ -126,7 +132,7 @@ flowchart TD
 - `SettingsStore.swift` — `UserDefaults` for config, **Keychain** for optional integration tokens.
 - `HermesClient.swift` / `OpenClawClient.swift` — optional handoff to local agent runtimes.
 
-**Linux implementation (`linux/agent_newsbot/`, Python 3, stdlib + `feedparser` + `requests`):**
+**Linux implementation (`linux/agent_newsbot/`, Python 3 with hash-locked runtime dependencies):**
 
 - `server.py` / `bounded_http.py` — bounded threaded HTTP on `127.0.0.1`, bearer-token auth, background fetch loop,
   atomic `latest.json` writes.
@@ -135,7 +141,10 @@ flowchart TD
   parsing, HTML stripping.
 - `config.py` — feed tables, desk titles/tags, and all env-var-driven configuration.
 - `hashtags.py` — the tag + 280-char tweet composer.
-- `__main__.py` — CLI: `serve` | `fetch` | `status`.
+- `stories.py`, `library.py`, `alerts.py` and related stores — durable research, editorial decisions, consumer delivery and saved-search notifications.
+- `source_health.py` — persistent source status and retry/probe coordination.
+- `recovery.py`, `application_recovery.py` and `maintenance.py` — verified research/application archives and explicit backup-gated history pruning.
+- `__main__.py` — service, fetch, research, consumer and maintenance CLI commands; run `agent-newsbot --help`.
 
 ## The freshness model
 
@@ -154,7 +163,7 @@ Consumer recovery now includes backlog/acknowledgement status, history/date/reta
 
 Source-linked editorial briefs now organize retained reports, corrections, source evidence, unknowns and follow-up questions in the Mac editor, Linux `brief` command and authenticated API. Each research package adds `brief.md` and a structured brief from the same database snapshot. These are attributed research aids, not automated fact-checks or completed scripts. See [editorial briefs](docs/EDITORIAL_BRIEFS.md).
 
-Research backups now have explicit `backup`, `verify-backup` and `restore-research` commands. They preserve the shared Mac/Linux journal and optional caches using SQLite snapshots, verify hashes/integrity and restore only into a new folder. Credentials, configuration, exports and downstream agent state are separate; old consumer checkpoints need reconciliation before reconnecting. The native app includes the same standalone helper (Python 3.10+ required only for recovery). See [research recovery and its limits](docs/RESEARCH_RECOVERY.md).
+Research backups now have explicit `backup`, `verify-backup` and `restore-research` commands. They preserve the shared Mac/Linux journal and optional caches using SQLite snapshots, verify hashes/integrity and restore only into a new folder. Credentials, configuration, exports and downstream agent state are separate; old consumer checkpoints need reconciliation before reconnecting. The native app includes the same standalone helper (Python 3.10+ required only for recovery). See [research recovery and its limits](docs/RESEARCH_RECOVERY.md). For configuration and selected snapshot/research-export folders as well, use [application backup/verification/restore](docs/APPLICATION_RECOVERY.md); restores stay separate until you deliberately activate them.
 Explicit [history retention](docs/HISTORY_RETENTION.md) previews eligible events, requires a verified archive and preserves unacknowledged events, bookmarked history, the latest two revisions and draft/approval evidence. Agents must explicitly accept the retained suffix after pruning. Storage status reports journal/WAL/reusable bytes; there is no automatic deletion or overall growth cap.
 
 `GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.
@@ -206,7 +215,16 @@ a claim of power-loss durability. Archive cleanup remains best-effort after a su
 | `GET /v1/stories/<id>` | yes | Current durable story, even when absent from the fresh batch. Accepts recorded identity aliases. |
 | `GET /v1/stories/<id>/revisions?limit=50` | yes | Recorded revisions with before/after differences (1–100). |
 | `GET /v1/events?consumer=<name>&limit=<n>` | yes | Durable ordered revisions after that consumer's acknowledged cursor (limit 1–500). |
-| `POST /v1/events/ack?consumer=<name>&through=<seq>` | yes | Acknowledge a delivered prefix; cannot advance past events offered to that consumer. |
+| `POST /v1/events/ack?consumer=<name>&through=<seq>&generation=<n>` | yes | Acknowledge a committed delivered prefix in the current generation; active leases also require their token header. |
+| `GET/POST /v1/consumers` | yes | Consumer status, explicit onboarding/reset and optional worker leases. |
+| `GET /v1/sources` | yes | Persistent source health, last success and retry state. |
+| `GET /v1/library` | yes | Retained research filters and review priority. |
+| `GET/POST /v1/library/settings` | yes | Saved searches and source mutes. |
+| `GET/POST /v1/library/alerts` | yes | Saved-search subscriptions, coalesced inbox and exact-sequence seen actions. |
+| `GET/POST /v1/library/editorial?id=ID` | yes | Revision-bound drafts, notes and platform approvals. |
+| `GET /v1/library/brief?id=ID` | yes | Source-linked research brief from one saved snapshot. |
+| `GET /v1/library/export?id=ID` | yes | Saved research JSON; no server-side file write. |
+| `GET/POST /v1/library/repairs` | yes | Audited split/merge operations and idempotent receipts. |
 | `GET /v1/desks` | yes | Per-desk new/updated/carried/displayed counts, source errors and coverage. |
 | `GET /v1/status` | yes | Snapshot summary: fresh count, `fetched_at`, source coverage and fetch-job status. |
 | `POST /v1/fetch` | yes | Start a refresh: `202` with a job ID and `/v1/status` polling URL; `409` if already running. Poll until `fetch_job.state` is `completed` or `failed`. |
@@ -216,7 +234,7 @@ A successful refresh request is **accepted**, not completed. Read `fetch_job.id`
 `completed`, `failed`), start/end times and a final `total_articles` only on success.
 Check that the ID matches your request; another client may start a later job.
 A 409 response means work is already running; it does not return a completed snapshot.
-`desks[].fresh` counts changes this cycle; Linux also reports `new`, `updated`,
+`desks[].fresh` counts changes this cycle; both runtimes also report `new`, `updated`,
 `carried` and `displayed` so retained articles are not mislabeled as new.
 
 **Example (Linux service, token read from its export file):**

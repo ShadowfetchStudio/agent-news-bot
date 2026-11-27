@@ -1,0 +1,15 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "fixture": "/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-application-load-_x2ovhxo",
+  "scope": "Warm synthetic application-data trial; not a production machine recovery, secret-store recovery or slow-disk benchmark",
+  "stories": 200,
+  "events": 600,
+  "export_files": 128,
+  "export_bytes": 8650752,
+  "payload_bytes": 10494011,
+  "all_exports_and_config_equal": true,
+  "bridge_credential_excluded": true,
+  "backup_seconds": 0.035189874994102865,
+  "verify_seconds": 0.013338333985302597,
+  "restore_seconds": 0.052752916992176324
+}

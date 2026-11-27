@@ -1,0 +1,12 @@
+{
+  "packaged_helper_verified": true,
+  "payload_files": 129,
+  "helper_hashes": {
+    "application_recovery": "df988af5f073056896654b51cea17511b183dcbed60971c19310fb931a49af17",
+    "recovery": "b0c13274f90114043e8e730ec2051022bb619e656bc1c8c838fb6596fc19698b",
+    "maintenance": "8cefd11c7a98d26f6c8be9c92d79033197bea9f644010a52975a75747be21e0d",
+    "retention": "ce6056e12418d3d5325ba2741492151db07e74c685726ef4e751ec8eaa1f50a1"
+  },
+  "architecture": "arm64",
+  "signature": "strict ad-hoc verification passed; not notarization"
+}

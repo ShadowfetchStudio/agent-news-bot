@@ -12,6 +12,10 @@ def main(argv: list[str] | None = None) -> int:
     # dependencies are broken. Explicit paths avoid activating the current home.
     recovery_commands = {"backup", "verify-backup", "restore-research"}
     raw = sys.argv[1:] if argv is None else argv
+    application_commands = {"backup-application", "verify-application", "restore-application"}
+    if raw and raw[0] in application_commands:
+        from .application_recovery import main as application_main
+        return application_main(raw)
     if raw and raw[0] in recovery_commands:
         from .recovery import main as recovery_main
         return recovery_main(raw)
@@ -21,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         return maintenance_main(raw)
     parser = argparse.ArgumentParser(prog="agent-newsbot")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in sorted(recovery_commands | maintenance_commands):
+    for name in sorted(recovery_commands | maintenance_commands | application_commands):
         sub.add_parser(name, help=("Explicit research maintenance; use " if name in maintenance_commands else "Research recovery into a new folder; use ") + name + " --help")
     sub.add_parser("serve", help="Run the localhost API and periodic fetch loop")
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
