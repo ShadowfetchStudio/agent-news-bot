@@ -53,6 +53,7 @@ final class NewsEngine: ObservableObject {
     @Published var isFetching = false
     @Published var status = "Ready. Fetch Fresh finds new stories and updates inside the lookback window."
     @Published var report: FetchReport?
+    @Published var coverageState = "unknown"
     @Published var hermes = AgentStatus(kind: .hermes, label: "Hermes", detail: "Checking…", ready: false)
     @Published var openclaw = AgentStatus(kind: .openclaw, label: "OpenClaw", detail: "Checking…", ready: false)
     @Published var bridgeReady = false
@@ -166,11 +167,12 @@ final class NewsEngine: ObservableObject {
         for original in wm {
             var result = original
             if !enabled.contains(result.desk) { result.articles = [] }
-            if result.articles.isEmpty && result.sourceErrors.isEmpty { continue }
+            if result.articles.isEmpty && result.sourceErrors.isEmpty && result.sourceChecks.isEmpty { continue }
             if let i = results.firstIndex(where: { $0.desk == result.desk }) {
                 results[i].articles += result.articles
                 results[i].skippedOld += result.skippedOld
                 results[i].sourceErrors += result.sourceErrors
+                results[i].sourceChecks += result.coverageChecks
             } else { results.append(result) }
         }
         results.sort { $0.desk.title < $1.desk.title }
@@ -194,6 +196,7 @@ final class NewsEngine: ObservableObject {
         let finished = Date()
         let fetchedAtISO = ISO8601DateFormatter().string(from: finished)
         desks = results
+        coverageState = Coverage.summary(results.flatMap(\.coverageChecks))["state"] as? String ?? "unknown"
         articles = merged
         selected = merged.first
         snapshot.update(articles: merged, desks: results, fetchedAt: fetchedAtISO)
@@ -203,6 +206,7 @@ final class NewsEngine: ObservableObject {
         exportJSON(fetchedAt: fetchedAtISO)
         completedFetches += 1
         let errors = results.flatMap(\.sourceErrors).count
+        let coverageLabel = "Coverage: " + coverageState + " · "
         if merged.isEmpty {
             status = errors > 0
                 ? "No new stories returned · \(errors) source warnings. Full coverage could not be confirmed."
@@ -210,11 +214,13 @@ final class NewsEngine: ObservableObject {
         } else {
             status = "\(merged.count) new or updated stories · \(errors) source warnings"
         }
+        status = coverageLabel + status
         isFetching = false
         snapshot.setFetching(false)
     }
 
     func copyTweet(_ article: Article) {
+        guard !article.tweet.isEmpty, article.tweetChars <= 280 else { status = "Draft is unavailable or over the X limit."; return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(article.tweet, forType: .string)
         status = "Copied tweet for \(article.source)"
@@ -265,6 +271,8 @@ final class NewsEngine: ObservableObject {
         let payload: [String: Any] = [
             "fetched_at": fetchedAt,
             "total_articles": articles.count,
+            "coverage": Coverage.summary(desks.flatMap(\.coverageChecks)),
+            "desks": desks.map(\.wire),
             "articles": articles.map(\.wire),
             "lookback_hours": settings.lookbackHours,
             "categories": Dictionary(uniqueKeysWithValues: Desk.allCases.map { desk in

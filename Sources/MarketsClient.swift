@@ -3,6 +3,7 @@ import Foundation
 enum MarketsClient {
     static func fetch(symbols: String, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
+        var checks: [SourceCheck] = []
         var skippedDup = 0
         var articles: [Article] = []
         var quoteUpdates: [(String, String)] = []
@@ -27,7 +28,8 @@ enum MarketsClient {
                 let prev = number(meta["chartPreviousClose"]) != 0 ? number(meta["chartPreviousClose"]) : number(meta["previousClose"])
                 let name = string(meta["shortName"]).isEmpty ? string(meta["longName"]) : string(meta["shortName"])
                 let currency = string(meta["currency"]).isEmpty ? "USD" : string(meta["currency"])
-                guard price > 0 else { continue }
+                guard price > 0, price.isFinite else { throw URLError(.cannotParseResponse) }
+                checks.append(SourceCheck(source: "Yahoo Finance " + symbol))
                 let change = prev > 0 ? (price - prev) / prev : 0
                 let payload = String(format: "%.4f|%.5f", price, change)
                 if let last = store.lastQuote(symbol), last == payload {
@@ -65,6 +67,7 @@ enum MarketsClient {
                 ))
             } catch {
                 errors.append("\(symbol): quote failed")
+                checks.append(SourceCheck(source: "Yahoo Finance " + symbol, state: "unavailable", detail: "Quote request or parsing failed"))
             }
         }
 
@@ -72,7 +75,7 @@ enum MarketsClient {
             abs(Double($0.extra["change"] ?? "0") ?? 0) > abs(Double($1.extra["change"] ?? "0") ?? 0)
         }
         if articles.count > maxItems { articles = Array(articles.prefix(maxItems)) }
-        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors, quoteUpdates: checkpoints(for: articles, observations: quoteUpdates))
+        return DeskResult(desk: .markets, articles: articles, skippedOld: 0, skippedDup: skippedDup, sourceErrors: errors, quoteUpdates: checkpoints(for: articles, observations: quoteUpdates), sourceChecks: checks)
     }
 
     static func checkpoints(for articles: [Article], observations: [(String, String)]) -> [(String, String)] {

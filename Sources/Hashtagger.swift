@@ -38,19 +38,9 @@ enum Hashtagger {
     }
 
     static func tweet(title: String, url: String, tags: [String]) -> (String, Int) {
-        let tagStr = tags.joined(separator: " ")
-        let urlCost = 23
-        let limit = 280
-        let fixed = 1 + urlCost + (tagStr.isEmpty ? 0 : 1 + tagStr.count)
-        var comment = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let available = Swift.max(0, limit - fixed)
-        if comment.count > available {
-            let cut = Swift.max(0, available - 1)
-            comment = String(comment.prefix(cut)).trimmingCharacters(in: .whitespaces) + "…"
-        }
-        let tweet = [comment, url, tagStr].filter { !$0.isEmpty }.joined(separator: " ")
-        let counted = comment.count + 1 + urlCost + (tagStr.isEmpty ? 0 : 1 + tagStr.count)
-        return (tweet, counted)
+        // Fail closed: no copyable draft is safer than approving a post using an inaccurate fallback.
+        do { return try XText.compose(title: title, url: url, tags: tags) }
+        catch { return ("", 281) }
     }
 
     private static func keywords(in title: String) -> [String] {

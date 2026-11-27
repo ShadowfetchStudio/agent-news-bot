@@ -3,6 +3,7 @@ import Foundation
 enum PolymarketClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
+        var checks: [SourceCheck] = []
         let skippedDup = 0
         var skippedOld = 0
         var articles: [Article] = []
@@ -15,7 +16,8 @@ enum PolymarketClient {
         for raw in urls {
             do {
                 let any = try await Net.json(from: URL(string: raw)!)
-                let rows = any as? [[String: Any]] ?? []
+                guard let rows = any as? [[String: Any]] else { throw URLError(.cannotParseResponse) }
+                checks.append(SourceCheck(source: URL(string: raw)!.path))
                 for row in rows {
                     let title = string(row["title"] ?? row["question"] ?? row["slug"])
                     guard !title.isEmpty else { continue }
@@ -55,6 +57,7 @@ enum PolymarketClient {
                 }
             } catch {
                 errors.append("Polymarket: API unreachable")
+                checks.append(SourceCheck(source: URL(string: raw)!.path, state: "unavailable", detail: "Request or parsing failed"))
             }
         }
 
@@ -65,7 +68,7 @@ enum PolymarketClient {
         }
         unique.sort { ($0.extra["volume"].flatMap(Double.init) ?? 0) > ($1.extra["volume"].flatMap(Double.init) ?? 0) }
         if unique.count > maxItems { unique = Array(unique.prefix(maxItems)) }
-        return DeskResult(desk: .polymarket, articles: unique, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors)
+        return DeskResult(desk: .polymarket, articles: unique, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors, sourceChecks: checks)
     }
 
     private static func string(_ value: Any?) -> String {

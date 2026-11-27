@@ -3,6 +3,7 @@ import Foundation
 enum HNClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
+        var checks: [SourceCheck] = []
         var skippedOld = 0
         let skippedDup = 0
         var articles: [Article] = []
@@ -10,6 +11,7 @@ enum HNClient {
         do {
             let newest = try await ids(from: "https://hacker-news.firebaseio.com/v0/newstories.json")
             let top = try await ids(from: "https://hacker-news.firebaseio.com/v0/topstories.json")
+            checks.append(SourceCheck(source: "Hacker News indexes"))
             var ordered: [Int] = []
             var seen = Set<Int>()
             for id in newest.prefix(80) + top.prefix(40) where seen.insert(id).inserted {
@@ -19,7 +21,10 @@ enum HNClient {
             let cutoff = Date().addingTimeInterval(-lookbackHours * 3600)
             for id in ordered {
                 if articles.count >= maxItems { break }
-                guard let item = await story(id) else { continue }
+                let candidate: Story?
+                do { candidate = try await story(id) }
+                catch { errors.append("Hacker News: item request failed"); continue }
+                guard let item = candidate else { continue }
                 guard item.type == "story" || item.type == nil else { continue }
                 guard !item.title.isEmpty else { continue }
                 let published = Date(timeIntervalSince1970: TimeInterval(item.time ?? 0))
@@ -52,12 +57,13 @@ enum HNClient {
         }
 
         articles.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
-        return DeskResult(desk: .hackerNews, articles: articles, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors)
+        return DeskResult(desk: .hackerNews, articles: articles, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors, sourceChecks: checks)
     }
 
     private static func ids(from url: String) async throws -> [Int] {
         let any = try await Net.json(from: URL(string: url)!)
-        return (any as? [Int]) ?? []
+        guard let ids = any as? [Int] else { throw URLError(.cannotParseResponse) }
+        return ids
     }
 
     private struct Story: Decodable {
@@ -73,7 +79,7 @@ enum HNClient {
         var deleted: Bool?
     }
 
-    private static func story(_ id: Int) async -> Story? {
+    private static func story(_ id: Int) async throws -> Story? {
         guard let url = URL(string: "https://hacker-news.firebaseio.com/v0/item/\(id).json") else { return nil }
         do {
             let data = try await Net.data(from: url, accept: "application/json")
@@ -81,7 +87,7 @@ enum HNClient {
             if item.dead == true || item.deleted == true { return nil }
             return item
         } catch {
-            return nil
+            throw error
         }
     }
 }

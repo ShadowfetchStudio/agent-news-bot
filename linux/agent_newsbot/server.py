@@ -288,7 +288,9 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "ok": True,
-                    "fresh": snap.get("total_articles", 0),
+                    "fresh": sum(not a.get("carried") for a in snap.get("articles", [])),
+                    "displayed": snap.get("total_articles", 0),
+                    "coverage": snap.get("coverage", {"state": "unknown"}),
                     "fetched_at": snap.get("fetched_at"),
                     "fetching": fetching,
                     "fetch_job": job,

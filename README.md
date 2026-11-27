@@ -4,7 +4,7 @@
 
 A local-first **news desk for AI agents**. Agent News Bot scans 14 topic "desks" from public,
 key-free sources, groups related stories while preserving their sources, tracks new and changed reports, generates
-a ready-to-post tweet and hashtags for each item, and serves the fresh batch over a small
+a length-checked X draft and hashtags for each item, and serves the fresh batch over a small
 token-authenticated HTTP API bound to `127.0.0.1`. An agent, script, or newsroom pipeline can ask
 "what's actually new right now?" and get a clean JSON answer instead of re-scraping the open web.
 
@@ -55,8 +55,8 @@ work independently. See [World Monitor integration and durable delivery](docs/wo
 - **14 desks** spanning general news, finance, tech/AI, prediction markets, and weather.
 - **Key-free default sources.** Public RSS/Atom and JSON APIs work without keys. The optional World Monitor connector can use a self-hosted endpoint or an appropriately licensed hosted API.
 - **New stories and updates.** A SQLite story journal groups canonical URLs and similar headlines, preserves source links, and emits revisions for changed titles, summaries or added sources. The lookback window defaults to 12h. Snapshot reads are repeatable; use the event API for consumer-specific delivery.
-- **Social-ready output.** Each article carries a pre-composed `tweet` (280-char aware, counts the
-  `t.co` 23-char URL cost) and a `hashtags` list built from desk tags + keyword extraction.
+- **Validated social drafts.** Each article carries a `tweet` measured by the shared official twitter-text parser (weighted Unicode, emoji, NFC and URL counting), plus suggested hashtags. Drafts require editorial review. See [post validation and source coverage](docs/POST_LENGTH_AND_COVERAGE.md).
+- **Observable source coverage.** The Mac Coverage window and HTTP/JSON output distinguish successful, partial, stale, unavailable and unknown checks. New, updated, carried and displayed counts are separate.
 - **Token-authenticated localhost bridge.** `GET /v1/fresh`, `/v1/desks`, `/v1/status`, and
   `POST /v1/fetch`, bound to `127.0.0.1` only, behind a bearer token that is generated on first run.
 - **Two runtimes, one contract.** Native macOS app *and* headless Linux daemon expose the same API.
@@ -167,8 +167,8 @@ without a valid token or `405` on disallowed HTTP methods.
 | `GET /v1/stories/<id>/revisions?limit=50` | yes | Recorded revisions with before/after differences (1–100). |
 | `GET /v1/events?consumer=<name>&limit=<n>` | yes | Durable ordered revisions after that consumer's acknowledged cursor (limit 1–500). |
 | `POST /v1/events/ack?consumer=<name>&through=<seq>` | yes | Acknowledge a delivered prefix; cannot advance past events offered to that consumer. |
-| `GET /v1/desks` | yes | Per-desk counts: fresh, skipped-old, skipped-dup, and source errors. |
-| `GET /v1/status` | yes | Snapshot summary: total fresh, `fetched_at`, whether a fetch is in flight. |
+| `GET /v1/desks` | yes | Per-desk new/updated/carried/displayed counts, source errors and coverage. |
+| `GET /v1/status` | yes | Snapshot summary: fresh count, `fetched_at`, source coverage and fetch-job status. |
 | `POST /v1/fetch` | yes | Start a refresh: `202` with a job ID and `/v1/status` polling URL; `409` if already running. Poll until `fetch_job.state` is `completed` or `failed`. |
 
 A successful refresh request is **accepted**, not completed. Read `fetch_job.id` from the

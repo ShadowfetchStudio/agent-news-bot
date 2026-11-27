@@ -4,6 +4,7 @@ import copy
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -167,8 +168,9 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "Freshness", "Hashtagger", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "Coverage", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
+    shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
 
 
@@ -709,3 +711,122 @@ def test_native_atom_markup_alternate_link_and_invalid_document(swift_harness, t
     assert swift(swift_harness, "rss-parse", feed)["error"] == "invalid feed"
     feed.write_text('<rss><channel><item><title>Incomplete')
     assert swift(swift_harness, "rss-parse", feed)["error"] == "invalid feed"
+
+
+def test_official_x_weighted_conformance():
+    from agent_newsbot.xtext import measure
+    fixture = json.loads((ROOT / "tests/fixtures/twitter-weighted.json").read_text())
+    for case in fixture["cases"]:
+        assert measure(case["text"]) == case["expected"], case["description"]
+
+
+def test_native_x_weighted_conformance(swift_harness, tmp_path):
+    fixture = json.loads((ROOT / "tests/fixtures/twitter-weighted.json").read_text())
+    path = tmp_path / "xtext.json"
+    path.write_text(json.dumps(fixture["cases"]))
+    actual = swift(swift_harness, "xtext", path)["items"]
+    assert actual == [row["expected"] for row in fixture["cases"]]
+
+
+def test_x_composer_parity_and_no_split_entities(swift_harness, tmp_path):
+    from agent_newsbot.xtext import request, measure
+    cases = [
+        {"title": "中" * 150, "url": "https://example.com/story", "tags": []},
+        {"title": "👨‍👩‍👧‍👦" * 150, "url": "https://example.com/story", "tags": ["#News"]},
+        {"title": "Cafe\u0301 " * 70, "url": "https://例え.jp/path", "tags": ["#世界"]},
+        {"title": "Read https://example.com/" + "a" * 300, "url": "https://example.com/2", "tags": []},
+        {"title": "", "url": "https://example.com", "tags": []},
+        {"title": "Story", "url": "", "tags": ["#" + "a" * 500, "#News"]},
+        {"title": "Hello", "url": "", "tags": []},
+    ]
+    path = tmp_path / "xtext.json"
+    path.write_text(json.dumps(cases))
+    expected = [request(case) for case in cases]
+    assert swift(swift_harness, "xtext", path)["items"] == expected
+    for result in expected:
+        assert result["valid"] and result["weightedLength"] <= 280
+        assert measure(result["text"])["weightedLength"] == result["weightedLength"]
+    assert expected[0]["weightedLength"] == 280
+    family = expected[1]["text"].split("…")[0]
+    assert not family.replace("👨‍👩‍👧‍👦", "")
+    assert "Cafe\u0301" not in expected[2]["text"]
+    assert cases[3]["title"] in expected[3]["text"]
+
+
+def test_x_composer_linux_limits_and_parallel_workers():
+    from concurrent.futures import ThreadPoolExecutor
+    from agent_newsbot.hashtags import tweet
+    from agent_newsbot.xtext import measure
+    cases = [("中" * 150, "https://example.com", []), ("👩🏽‍🚀" * 180, "https://example.com", ["#Space"]),
+             ("e\u0301" * 400, "https://example.com", ["#" + "a" * 500, "#News"])] * 6
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda args: tweet(*args), cases))
+    for text, count in results:
+        assert count <= 280 and measure(text)["valid"]
+        assert count == measure(text)["weightedLength"]
+
+
+@pytest.mark.parametrize("states,expected", [([], "unknown"), (["success"], "success"),
+    (["unavailable", "unavailable"], "unavailable"), (["success", "unavailable"], "partial"),
+    (["stale", "unavailable"], "stale"), (["partial"], "partial")])
+def test_coverage_state_parity(swift_harness, tmp_path, states, expected):
+    from agent_newsbot.coverage import summary
+    rows = [{"source": str(i), "provider": "direct", "state": state, "detail": "", "checked_at": "fixture"} for i, state in enumerate(states)]
+    path = tmp_path / "checks.json"; path.write_text(json.dumps(rows))
+    native = swift(swift_harness, "coverage", path)
+    assert native == summary(rows)
+    assert native["state"] == expected
+
+
+def test_all_failed_fetch_cannot_claim_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, "ALL_DESKS", ["science", "world"])
+    monkeypatch.setattr(engine, "fetch_desk", lambda desk, *_: DeskResult(desk, [], source_errors=["unavailable"]))
+    monkeypatch.setattr(worldmonitor, "fetch", lambda *_: [])
+    result = engine.fetch_all(FreshnessStore(tmp_path / "seen.sqlite"))
+    assert result["coverage"]["state"] == "unavailable"
+    assert result["total_articles"] == 0
+    assert all(d["coverage"]["state"] == "unavailable" for d in result["desks"])
+
+
+def test_valid_empty_feed_is_success_but_malformed_is_unavailable(tmp_path, monkeypatch):
+    from agent_newsbot.coverage import summary, result_checks
+    class Response:
+        status_code = 200
+        headers = {}
+        def raise_for_status(self): pass
+    response = Response()
+    monkeypatch.setattr(engine, "RSS_FEEDS", {"science": [("https://example.com/feed", "Fixture")]})
+    monkeypatch.setattr(engine, "_get", lambda *_args, **_kwargs: response)
+    for body, expected in [(b'<rss version="2.0"><channel><title>Empty</title></channel></rss>', "success"),
+                           (b'<html><title>Maintenance</title></html>', "unavailable")]:
+        response.content = body
+        result = engine.fetch_rss("science", FreshnessStore(tmp_path / "seen.sqlite"), 12, 20)
+        assert not result.articles
+        assert summary(result_checks(result))["state"] == expected
+
+
+def test_missing_weather_observation_never_becomes_zero_forecast(tmp_path, monkeypatch):
+    class Response:
+        def __init__(self, payload): self.payload = payload
+        def json(self): return self.payload
+    replies = iter([Response({"results": [{"latitude": 40.7, "longitude": -74, "name": "New York"}]}), Response({"error": "maintenance"})])
+    monkeypatch.setattr(engine, "_get", lambda *_args, **_kwargs: next(replies))
+    result = engine.fetch_weather(FreshnessStore(tmp_path / "seen.sqlite"), "New York")
+    assert not result.articles and result.source_errors
+
+
+def test_native_separate_change_and_display_counts(swift_harness, tmp_path):
+    rows = [dict(article("https://example.com/" + str(i)), change=change, carried=carried) for i, (change, carried) in
+            enumerate([("new", False), ("updated", False), ("enriched", False), ("new", True)])]
+    path = tmp_path / "articles.json"; path.write_text(json.dumps(rows))
+    result = swift(swift_harness, "desk-counts", path)
+    assert {k: result[k] for k in ("new", "updated", "carried", "fresh", "displayed")} == dict(new=1, updated=2, carried=1, fresh=3, displayed=4)
+
+
+@pytest.mark.parametrize("body,expected", [(b'<rss version="2.0"><channel><title>Empty</title></channel></rss>', "success"),
+                                           (b'<html><title>Maintenance</title></html>', "unavailable")])
+def test_native_rss_coverage_real_http(swift_harness, tmp_path, body, expected):
+    with provider(body) as (url, _):
+        result = swift(swift_harness, "rss", url, tmp_path / "cache.sqlite", 12, 20)
+        assert result["coverage"]["state"] == expected
+        assert not result["articles"]

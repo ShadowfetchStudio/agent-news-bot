@@ -29,7 +29,9 @@ enum WeatherClient {
                 "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=2&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto"
             )!
             let wx = try await Net.json(from: wxURL) as? [String: Any]
-            let current = wx?["current"] as? [String: Any] ?? [:]
+            guard let current = wx?["current"] as? [String: Any],
+                  current["temperature_2m"] is NSNumber, current["weather_code"] is NSNumber,
+                  current["apparent_temperature"] is NSNumber, current["wind_speed_10m"] is NSNumber else { throw URLError(.cannotParseResponse) }
             let daily = wx?["daily"] as? [String: Any] ?? [:]
             let temp = number(current["temperature_2m"])
             let feel = number(current["apparent_temperature"])
@@ -42,7 +44,7 @@ enum WeatherClient {
             let low = minArr.first ?? temp
             let payload = String(format: "%.0f|%d|%.0f", temp, code, high)
             if store.lastQuote("weather:\(place)") == payload {
-                return DeskResult(desk: .weather, articles: [], skippedOld: 0, skippedDup: 1, sourceErrors: [])
+                return DeskResult(desk: .weather, articles: [], skippedOld: 0, skippedDup: 1, sourceErrors: [], sourceChecks: [SourceCheck(source: "Open-Meteo")])
             }
 
             let title = "\(place): \(Int(temp))°F \(condition)"
@@ -64,7 +66,7 @@ enum WeatherClient {
                 hashtags: tags,
                 extra: ["city": place]
             )
-            return DeskResult(desk: .weather, articles: [article], skippedOld: 0, skippedDup: 0, sourceErrors: [], quoteUpdates: [("weather:\(place)", payload)])
+            return DeskResult(desk: .weather, articles: [article], skippedOld: 0, skippedDup: 0, sourceErrors: [], quoteUpdates: [("weather:\(place)", payload)], sourceChecks: [SourceCheck(source: "Open-Meteo")])
         } catch {
             errors.append("Weather: Open-Meteo unreachable")
             return DeskResult(desk: .weather, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: errors)

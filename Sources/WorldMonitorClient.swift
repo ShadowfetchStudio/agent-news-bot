@@ -36,7 +36,7 @@ enum WorldMonitorClient {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else { throw Failure.payload }
             guard http.statusCode == 200 else {
-                return [DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: ["World Monitor HTTP \(http.statusCode)"])]
+                return [DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: ["World Monitor HTTP \(http.statusCode)"], sourceChecks: [SourceCheck(source: "World Monitor digest", provider: "worldmonitor", state: "unavailable", detail: "HTTP \(http.statusCode)")])]
             }
             var data = Data()
             for try await byte in bytes {
@@ -45,7 +45,7 @@ enum WorldMonitorClient {
             }
             return try parse(data: data, lookback: lookback, limit: limit)
         } catch {
-            return [DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: ["World Monitor unavailable or invalid response/configuration"])]
+            return [DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: ["World Monitor unavailable or invalid response/configuration"], sourceChecks: [SourceCheck(source: "World Monitor digest", provider: "worldmonitor", state: "unavailable", detail: "Request, configuration or parsing failed")])]
         }
     }
 
@@ -99,6 +99,14 @@ enum WorldMonitorClient {
             var result = results[.world] ?? DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: [])
             result.sourceErrors += warnings
             results[.world] = result
+        }
+        let reported = (payload["coverage"] as? [String: Any])?["state"] as? String ?? "complete"
+        var state = reported == "complete" ? "success" : reported
+        if !["success", "partial", "stale", "unavailable"].contains(state) { state = "partial" }
+        if state == "success" && !warnings.isEmpty { state = "partial" }
+        if results.isEmpty { results[.world] = DeskResult(desk: .world, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: []) }
+        for desk in Array(results.keys) {
+            results[desk]!.sourceChecks = [SourceCheck(source: "World Monitor digest", provider: "worldmonitor", state: state, detail: warnings.joined(separator: "; "))]
         }
         return Array(results.values)
     }

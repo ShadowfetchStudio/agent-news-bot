@@ -176,3 +176,4 @@ class DeskResult:
     source_errors: list[str] = field(default_factory=list)
     feed_cache_updates: list[tuple[str, str | None, str | None, bytes, float]] = field(default_factory=list)
     quote_updates: list[tuple[str, str]] = field(default_factory=list)
+    source_checks: list[dict] = field(default_factory=list)

@@ -4,6 +4,20 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "desk-counts" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: Any]]
+            let result = DeskResult(desk: .science, articles: try rows.map { try Article.fromWire($0) }, skippedOld: 0, skippedDup: 0, sourceErrors: [])
+            try output(result.wire); return
+        }
+        if args[1] == "coverage" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: String]]
+            let checks = rows.map { SourceCheck(source: $0["source"]!, provider: $0["provider"] ?? "direct", state: $0["state"]!, checkedAt: "fixture") }
+            try output(Coverage.summary(checks)); return
+        }
+        if args[1] == "xtext" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: Any]]
+            try output(["items": try rows.map { try XText.request($0) }]); return
+        }
         if args[1] == "keychain-failure" {
             var deletes = 0, adds = 0
             let ops = Keychain.Operations(update: { _, _ in errSecAuthFailed },
@@ -31,17 +45,17 @@ import Security
             let store = FreshnessStore(path: URL(fileURLWithPath: args[3]))
             let result = await RSSClient.fetch(desk: .science, lookbackHours: Double(args[4])!, maxItems: Int(args[5])!, store: store, feeds: [FeedSource(url: args[2], label: "Fixture")])
             for update in result.cacheUpdates { store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt) }
-            try output(["articles": result.articles.map(\.wire), "errors": result.sourceErrors]); return
+            try output(["articles": result.articles.map(\.wire), "errors": result.sourceErrors, "coverage": Coverage.summary(result.coverageChecks)]); return
         }
         if args[1] == "fetch" {
             let results = await WorldMonitorClient.fetch(enabled: true, base: args[2], key: "test-fixture-key", variant: "tech", lookback: 100000, limit: 20)
-            try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors)])
+            try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors), "coverage": Coverage.summary(results.flatMap(\.coverageChecks))])
             return
         }
         if args[1] == "digest" {
             let data = try Data(contentsOf: URL(fileURLWithPath: args[2]))
             let results = try WorldMonitorClient.parse(data: data, lookback: 12, limit: 20, now: Date(timeIntervalSince1970: 1795780800))
-            try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors)])
+            try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors), "coverage": Coverage.summary(results.flatMap(\.coverageChecks))])
             return
         }
         if args[1] == "skill-install" {

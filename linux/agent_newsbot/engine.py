@@ -14,6 +14,7 @@ import requests
 
 from . import hashtags, worldmonitor
 from .stories import StoryStore
+from . import coverage
 from .config import (
     ALL_DESKS,
     Article,
@@ -68,6 +69,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
     skipped_dup = 0
     seen_urls: set[str] = set()
     cache_updates = []
+    checks = []
     for url, label in RSS_FEEDS.get(desk, []):
         try:
             etag, last_mod = store.feed_cache(url)
@@ -97,6 +99,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
             parsed = feedparser.parse(body)
             if not parsed.version:
                 raise ValueError("invalid feed")
+            checks.append(coverage.check(label))
             if resp.status_code != 304:
                 cache_updates.append((url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"), body, observed_at))
             for entry in parsed.entries:
@@ -140,19 +143,24 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
         except Exception as exc:
             log.warning("feed failed %s %s: %s", desk, label, exc)
             errors.append(f"{label}: feed unreachable")
+            checks.append(coverage.check(label, "unavailable", "Feed request or parsing failed"))
         time.sleep(0.12)
     collected.sort(key=lambda a: a.published or "", reverse=True)
-    return DeskResult(desk, collected[:limit], skipped_old, skipped_dup, errors, cache_updates)
+    return DeskResult(desk, collected[:limit], skipped_old, skipped_dup, errors, cache_updates, source_checks=checks)
 
 
 def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
     errors: list[str] = []
+    checks = []
     skipped_old = 0
     skipped_dup = 0
     articles: list[Article] = []
     try:
         newest = _get("https://hacker-news.firebaseio.com/v0/newstories.json", accept="application/json").json()
         top = _get("https://hacker-news.firebaseio.com/v0/topstories.json", accept="application/json").json()
+        if not isinstance(newest, list) or not isinstance(top, list):
+            raise ValueError("Invalid Hacker News indexes")
+        checks.append(coverage.check("Hacker News indexes"))
         ordered: list[int] = []
         seen: set[int] = set()
         for hid in list(newest[:80]) + list(top[:40]):
@@ -166,6 +174,7 @@ def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
             try:
                 item = _get(f"https://hacker-news.firebaseio.com/v0/item/{hid}.json", accept="application/json", timeout=8).json()
             except Exception:
+                errors.append("Hacker News: item request failed")
                 continue
             if not item or item.get("dead") or item.get("deleted"):
                 continue
@@ -205,7 +214,7 @@ def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
         log.warning("hn failed: %s", exc)
         errors.append("Hacker News: API unreachable")
     articles.sort(key=lambda a: a.published or "", reverse=True)
-    return DeskResult("hackerNews", articles, skipped_old, skipped_dup, errors)
+    return DeskResult("hackerNews", articles, skipped_old, skipped_dup, errors, source_checks=checks)
 
 
 def _num(value: Any) -> float:
@@ -217,6 +226,7 @@ def _num(value: Any) -> float:
 
 def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
     errors: list[str] = []
+    checks = []
     skipped_dup = 0
     skipped_old = 0
     articles: list[Article] = []
@@ -228,7 +238,8 @@ def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> Desk
         try:
             rows = _get(url, accept="application/json").json()
             if not isinstance(rows, list):
-                continue
+                raise ValueError("Invalid prediction market response")
+            checks.append(coverage.check("Polymarket " + url.split("?")[0].rsplit("/", 1)[-1]))
             for row in rows:
                 title = str(row.get("title") or row.get("question") or row.get("slug") or "")
                 if not title:
@@ -266,6 +277,7 @@ def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> Desk
         except Exception as exc:
             log.warning("polymarket failed: %s", exc)
             errors.append("Polymarket: API unreachable")
+            checks.append(coverage.check("Polymarket " + url.split("?")[0].rsplit("/", 1)[-1], "unavailable", "Request or parsing failed"))
     unique: list[Article] = []
     seen: set[str] = set()
     for article in articles:
@@ -274,7 +286,7 @@ def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> Desk
         seen.add(article.id)
         unique.append(article)
     unique.sort(key=lambda a: float(a.extra.get("volume") or 0), reverse=True)
-    return DeskResult("polymarket", unique[:limit], skipped_old, skipped_dup, errors)
+    return DeskResult("polymarket", unique[:limit], skipped_old, skipped_dup, errors, source_checks=checks)
 
 
 SYMBOL_NAMES = {"^GSPC": "S&P 500", "^DJI": "Dow", "^IXIC": "Nasdaq"}
@@ -283,6 +295,7 @@ SYMBOL_NAMES = {"^GSPC": "S&P 500", "^DJI": "Dow", "^IXIC": "Nasdaq"}
 def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult:
     quote_updates = []
     errors: list[str] = []
+    checks = []
     skipped_dup = 0
     articles: list[Article] = []
     for symbol in [s.strip().upper() for s in symbols.split(",") if s.strip()]:
@@ -293,8 +306,9 @@ def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult
             meta = payload["chart"]["result"][0]["meta"]
             price = _num(meta.get("regularMarketPrice"))
             prev = _num(meta.get("chartPreviousClose")) or _num(meta.get("previousClose"))
-            if price <= 0:
-                continue
+            if not 0 < price < float("inf"):
+                raise ValueError("Invalid quote price")
+            checks.append(coverage.check("Yahoo Finance " + symbol))
             change = (price - prev) / prev if prev else 0.0
             snapshot = f"{price:.4f}|{change:.5f}"
             last = store.last_quote(symbol)
@@ -332,11 +346,12 @@ def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult
         except Exception as exc:
             log.warning("market %s failed: %s", symbol, exc)
             errors.append(f"{symbol}: quote failed")
+            checks.append(coverage.check("Yahoo Finance " + symbol, "unavailable", "Quote request or parsing failed"))
     articles.sort(key=lambda a: abs(float(a.extra.get("change") or 0)), reverse=True)
     selected = articles[:limit]
     selected_symbols = {a.extra["symbol"] for a in selected}
     return DeskResult("markets", selected, 0, skipped_dup, errors,
-                      quote_updates=[q for q in quote_updates if q[0] in selected_symbols])
+                      quote_updates=[q for q in quote_updates if q[0] in selected_symbols], source_checks=checks)
 
 
 WX = {
@@ -387,6 +402,8 @@ def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
             accept="application/json",
         ).json()
         current = wx.get("current") or {}
+        if any(not isinstance(current.get(k), (int, float)) for k in ("temperature_2m", "weather_code", "apparent_temperature", "wind_speed_10m")):
+            raise ValueError("Invalid weather observation")
         daily = wx.get("daily") or {}
         temp = _num(current.get("temperature_2m"))
         feel = _num(current.get("apparent_temperature"))
@@ -397,7 +414,7 @@ def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
         payload = f"{temp:.0f}|{code}|{high:.0f}"
         key = f"weather:{place}"
         if store.last_quote(key) == payload:
-            return DeskResult("weather", [], 0, 1, [])
+            return DeskResult("weather", [], 0, 1, [], source_checks=[coverage.check("Open-Meteo")])
         condition = WX.get(code, "Mixed")
         title = f"{place}: {int(temp)}°F {condition}"
         summary = f"Feels like {int(feel)}° · Wind {int(wind)} mph · Today {int(high)}/{int(low)}°F"
@@ -418,7 +435,7 @@ def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
             hashtags=tag_list,
             extra={"city": place},
         )
-        return DeskResult("weather", [article], 0, 0, [], quote_updates=[(key, payload)])
+        return DeskResult("weather", [article], 0, 0, [], quote_updates=[(key, payload)], source_checks=[coverage.check("Open-Meteo")])
     except Exception as exc:
         log.warning("weather failed: %s", exc)
         return DeskResult("weather", [], 0, 0, ["Weather: Open-Meteo unreachable"])
@@ -453,6 +470,7 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
         dest.source_errors.extend(result.source_errors)
         dest.feed_cache_updates.extend(result.feed_cache_updates)
         dest.quote_updates.extend(result.quote_updates)
+        dest.source_checks.extend(coverage.result_checks(result))
     results = sorted(combined.values(), key=lambda r: DESK_TITLES.get(r.desk, r.desk))
     candidates = [a for r in results for a in r.articles]
     journal = StoryStore(store.path.with_name("stories.sqlite"))
@@ -474,6 +492,7 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
         "total_articles": len(articles),
         "scanned": scanned,
         "articles": articles,
+        "coverage": coverage.summary([c for r in results for c in coverage.result_checks(r)]),
         "desks": [
             {
                 "desk": r.desk,
@@ -482,6 +501,11 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
                 "skipped_old": r.skipped_old,
                 "skipped_dup": r.skipped_dup,
                 "errors": r.source_errors,
+                "coverage": coverage.summary(coverage.result_checks(r)),
+                "new": sum(r.desk in a.get("desks", [a["desk"]]) and a.get("change") == "new" for a in articles),
+                "updated": sum(r.desk in a.get("desks", [a["desk"]]) and a.get("change") != "new" for a in articles),
+                "carried": 0,
+                "displayed": sum(r.desk in a.get("desks", [a["desk"]]) for a in articles),
             }
             for r in results
         ],

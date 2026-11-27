@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var engine: NewsEngine
+    @State private var showCoverage = false
 
     var body: some View {
         NavigationSplitView {
@@ -15,6 +16,7 @@ struct ContentView: View {
         }
         .background(Theme.bgDeep)
         .toolbar { toolbar }
+        .sheet(isPresented: $showCoverage) { CoverageView().environmentObject(engine) }
     }
 
     private var sidebar: some View {
@@ -77,7 +79,7 @@ struct ContentView: View {
             .padding(12)
             Divider()
             if engine.isFetching {
-                ProgressView("Fetching unseen stories…")
+                ProgressView("Fetching stories and revisions…")
                     .padding()
                 Spacer()
             } else if engine.filtered.isEmpty {
@@ -87,7 +89,7 @@ struct ContentView: View {
                         .foregroundStyle(Theme.gold)
                     Text("No fresh stories on this desk")
                         .font(.title3.weight(.semibold))
-                    Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. Only unseen items inside the lookback window appear here.")
+                    Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Coverage to inspect source failures.")
                         .foregroundStyle(Theme.textMed)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
@@ -101,6 +103,7 @@ struct ContentView: View {
                         .tag(article)
                         .contextMenu {
                             Button("Copy tweet") { engine.copyTweet(article) }
+                                .disabled(article.tweet.isEmpty || article.tweetChars > 280)
                             Button("Open story") { engine.openStory(article) }
                             Button("Send to Hermes") { Task { await engine.sendToHermes([article]) } }
                             Button("Send to OpenClaw") { Task { await engine.sendToOpenClaw([article]) } }
@@ -186,7 +189,7 @@ struct ContentView: View {
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(article.tweetChars > 280 ? Theme.danger : Theme.textLow)
                             }
-                            Text(article.tweet)
+                            Text(article.tweet.isEmpty ? "Draft unavailable. Refresh to retry validation." : article.tweet)
                                 .font(.body)
                                 .textSelection(.enabled)
                                 .padding(10)
@@ -194,6 +197,7 @@ struct ContentView: View {
                         }
                         HStack {
                             Button("Copy tweet") { engine.copyTweet(article) }
+                                .disabled(article.tweet.isEmpty || article.tweetChars > 280)
                             Button("Open story") { engine.openStory(article) }
                         }
                         HStack {
@@ -231,6 +235,7 @@ struct ContentView: View {
                 .foregroundStyle(Theme.textHi)
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            Button { showCoverage = true } label: { Label("Coverage", systemImage: "list.bullet.clipboard") }
             Button {
                 Task { await engine.fetchFresh() }
             } label: {

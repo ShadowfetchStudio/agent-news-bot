@@ -61,6 +61,9 @@ sips -z 512 512 "$PNG" --out "$ICONSET/icon_512x512.png" >/dev/null
 cp "$PNG" "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
+cp "$PROJECT_DIR/linux/agent_newsbot/vendor/twitter-text.js" "$APP_DIR/Contents/Resources/"
+cp "$PROJECT_DIR/linux/agent_newsbot/vendor/"*-LICENSE.txt "$APP_DIR/Contents/Resources/"
+
 echo "==> Compiling ($ARCH)"
 SWIFT_SOURCES=()
 while IFS= read -r -d '' source; do

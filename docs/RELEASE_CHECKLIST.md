@@ -13,11 +13,11 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 - [x] B07: truthful asynchronous fetch completion, concurrency and failure semantics on both runtimes.
 - [x] B08: installed Linux CLI works outside checkout and finds service state.
 - [x] B09: shared URL canonicalization fixtures and existing identity migration.
-- [ ] B10: source failure never appears as current coverage.
+- [x] B10: source failure never appears as current coverage.
 - [x] B11: unknown dates and restored snapshots expire deterministically.
-- [ ] B12: X weighted Unicode/URL counting and parity fixtures.
+- [x] B12: X weighted Unicode/URL counting and parity fixtures.
 - [x] B13: preserve custom agent skills; explicit managed installation.
-- [ ] B14: separate new/updated/carried/displayed counts.
+- [x] B14: separate new/updated/carried/displayed counts.
 
 ## Setup and everyday use
 
@@ -80,3 +80,11 @@ Validation snapshot for this batch: 58 tests passed on macOS; 47 passed with 11 
 - Validation: 73 tests passed on macOS; 54 passed and 19 Mac-specific skips on native Pop!_OS. The Apple Silicon app built and passed strict ad-hoc signature verification. Existing native agent CLI concurrency warnings remain on the release checklist.
 
 Remaining larger work includes weighted X counting, complete coverage/count reporting, setup and credential rotation, Mac refresh/restoration, searchable history/watchlists/editorial exports, consumer controls and maintenance/upgrade tooling, followed by final packaging and GitHub publication.
+
+## Repair batch 3 evidence
+
+- Replaced raw character counting with the same packaged twitter-text 3.1.0 parser in JavaScriptCore (Mac) and bounded thread-local QuickJS (Linux). Imported 24 official v3 cases and tested CJK, compound emoji, accents, URL preservation, oversized tags and concurrent workers. Parser failures preserve the story and disable its draft; the Mac Copy action is guarded.
+- Source checks now distinguish valid empty results from request/parsing failures and report success/partial/stale/unavailable/unknown coverage. A completed job does not imply successful coverage. HTTP status/desks and JSON exports expose it; the Mac Coverage window includes per-source details and separate change/display counts.
+- Fixed additional silent failures: Hacker News item fetches surface warnings, invalid index/prediction-market payload shapes fail visibly, missing weather fields cannot fabricate zero-valued forecasts, invalid quote prices are errors.
+- Last completed validation: 87 tests passed on macOS; 59 passed and 28 native-Mac skips on Pop!_OS. Native app build and strict ad-hoc signing passed. The vendored npm build dependencies had no known vulnerabilities reported by npm audit at this check; the wider release dependency scan remains open.
+- Remaining: actual GUI walkthrough, snapshot restoration/automatic refresh, persistent source history/backoff, setup/rotation, editorial and automation features, safe upgrades and final release verification. The coverage state describes the last attempt with explicit check times; it is not a continuous uptime assertion.

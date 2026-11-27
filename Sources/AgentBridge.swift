@@ -220,16 +220,7 @@ final class AgentBridge: @unchecked Sendable {
             if method != "GET" {
                 response = json(405, ["error": "method not allowed"])
             } else {
-                let desks = desksProvider().map { desk -> [String: Any] in
-                    [
-                        "desk": desk.desk.rawValue,
-                        "title": desk.desk.title,
-                        "fresh": desk.articles.count,
-                        "skipped_old": desk.skippedOld,
-                        "skipped_dup": desk.skippedDup,
-                        "errors": desk.sourceErrors
-                    ]
-                }
+                let desks = desksProvider().map(\.wire)
                 response = json(200, ["desks": desks])
             }
         } else if path == "/v1/status" {
@@ -243,6 +234,7 @@ final class AgentBridge: @unchecked Sendable {
                     "fetching": st.fetching
                 ]
                 payload["fetched_at"] = st.fetchedAt ?? NSNull()
+                payload["coverage"] = Coverage.summary(desksProvider().flatMap(\.coverageChecks))
                 let currentJob = jobLock.withLock { job }
                 payload["fetch_job"] = currentJob
                 payload["fetching"] = st.fetching || currentJob["state"] as? String == "running"

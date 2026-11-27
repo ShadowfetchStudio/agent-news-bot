@@ -144,6 +144,7 @@ struct DeskResult: Identifiable {
     var sourceErrors: [String]
     var cacheUpdates: [FeedCacheUpdate] = []
     var quoteUpdates: [(String, String)] = []
+    var sourceChecks: [SourceCheck] = []
 }
 
 struct FetchReport {

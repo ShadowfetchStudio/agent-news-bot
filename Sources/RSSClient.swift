@@ -4,6 +4,7 @@ enum RSSClient {
     static func fetch(desk: Desk, lookbackHours: Double, maxItems: Int, store: FreshnessStore, feeds: [FeedSource]? = nil) async -> DeskResult {
         var collected: [Article] = []
         var errors: [String] = []
+        var checks: [SourceCheck] = []
         var skippedOld = 0
         var skippedDup = 0
         var seenURLs = Set<String>()
@@ -11,7 +12,7 @@ enum RSSClient {
 
         for feed in feeds ?? FeedRegistry.feeds(for: desk) {
             do {
-                guard let url = URL(string: feed.url) else { continue }
+                guard let url = URL(string: feed.url) else { throw URLError(.badURL) }
                 let cached = store.feedCache(feed.url)
                 let document = store.feedDocument(feed.url)
                 let res = try await Net.dataConditional(
@@ -30,6 +31,7 @@ enum RSSClient {
                 }
                 guard body.count <= 4 * 1024 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
                 let items = try RSSParser.parseChecked(data: body)
+                checks.append(SourceCheck(source: feed.label))
                 if !res.notModified {
                     cacheUpdates.append(FeedCacheUpdate(url: feed.url, etag: res.etag, lastModified: res.lastModified, body: body, observedAt: observedAt))
                 }
@@ -68,13 +70,14 @@ enum RSSClient {
                 }
             } catch {
                 errors.append("\(feed.label): feed unreachable")
+                checks.append(SourceCheck(source: feed.label, state: "unavailable", detail: "Feed request or parsing failed"))
             }
             try? await Task.sleep(nanoseconds: 120_000_000)
         }
 
         collected.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         if collected.count > maxItems { collected = Array(collected.prefix(maxItems)) }
-        return DeskResult(desk: desk, articles: collected, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors, cacheUpdates: cacheUpdates)
+        return DeskResult(desk: desk, articles: collected, skippedOld: skippedOld, skippedDup: skippedDup, sourceErrors: errors, cacheUpdates: cacheUpdates, sourceChecks: checks)
     }
 }
 

@@ -47,18 +47,15 @@ def tags(desk: str, title: str, extra: list[str] | None = None) -> list[str]:
 
 
 def tweet(title: str, url: str, tag_list: list[str]) -> tuple[str, int]:
-    tag_str = " ".join(tag_list)
-    url_cost = 23
-    limit = 280
-    fixed = 1 + url_cost + (0 if not tag_str else 1 + len(tag_str))
-    comment = title.strip()
-    available = max(0, limit - fixed)
-    if len(comment) > available:
-        comment = comment[: max(0, available - 1)].rstrip() + "…"
-    parts = [p for p in (comment, url, tag_str) if p]
-    text = " ".join(parts)
-    counted = len(comment) + 1 + url_cost + (0 if not tag_str else 1 + len(tag_str))
-    return text, counted
+    from .xtext import compose
+    try:
+        return compose(title, url, tag_list)
+    except Exception:
+        # Parser resource/time failures must not discard a valid news observation.
+        # Empty draft + over-limit sentinel disables publishing/copy workflows.
+        import logging
+        logging.getLogger(__name__).warning("X draft validation unavailable")
+        return "", 281
 
 
 def _keywords(title: str) -> list[str]:

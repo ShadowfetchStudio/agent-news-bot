@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .coverage import check
 from .config import Article, DeskResult, DESK_TITLES
 from .hashtags import tags, tweet
 from .store import article_id, canonical_url, iso, strip_html
@@ -78,6 +79,14 @@ def parse_digest(payload: dict, lookback: float, limit: int, now: datetime | Non
         warnings.append(f"World Monitor skipped {skipped} invalid or undated items")
     if warnings:
         results.setdefault("world", DeskResult("world", [])).source_errors.extend(warnings)
+    reported = coverage.get("state", "complete") if isinstance(coverage, dict) else "complete"
+    state = "success" if reported == "complete" else reported
+    if state not in ("success", "partial", "stale", "unavailable") or (state == "success" and warnings):
+        state = "partial"
+    if not results:
+        results["world"] = DeskResult("world", [])
+    for result in results.values():
+        result.source_checks = [check("World Monitor digest", state, "; ".join(warnings), "worldmonitor")]
     return list(results.values())
 
 
@@ -96,7 +105,7 @@ def fetch(lookback: float, limit: int) -> list[DeskResult]:
         # Never forward the API key through redirects. No retries within a fetch cycle.
         with requests.get(base + "/api/news/v1/list-feed-digest", params={"variant": variant, "lang": "en"}, headers=headers, timeout=(5, 15), allow_redirects=False, stream=True) as response:
             if response.status_code != 200:
-                return [DeskResult("world", [], source_errors=[f"World Monitor HTTP {response.status_code}"])]
+                return [DeskResult("world", [], source_errors=[f"World Monitor HTTP {response.status_code}"], source_checks=[check("World Monitor digest", "unavailable", f"HTTP {response.status_code}", "worldmonitor")])]
             body = bytearray()
             for chunk in response.iter_content(65536):
                 body.extend(chunk)
@@ -105,4 +114,4 @@ def fetch(lookback: float, limit: int) -> list[DeskResult]:
             return parse_digest(json.loads(body), lookback, limit)
     except (requests.RequestException, ValueError, TypeError):
         # Do not log request URLs, credential-bearing headers, or response bodies.
-        return [DeskResult("world", [], source_errors=["World Monitor unavailable or invalid response/configuration"])]
+        return [DeskResult("world", [], source_errors=["World Monitor unavailable or invalid response/configuration"], source_checks=[check("World Monitor digest", "unavailable", "Request, configuration or parsing failed", "worldmonitor")])]
