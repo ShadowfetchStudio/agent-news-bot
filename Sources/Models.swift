@@ -117,6 +117,11 @@ struct Article: Identifiable, Hashable, Codable {
             hashtags: value["hashtags"] as? [String] ?? [], extra: details, storyJSON: String(decoding: data, as: UTF8.self))
     }
 
+    var desks: [Desk] {
+        let values = (wire["desks"] as? [String] ?? [desk.rawValue]).compactMap(Desk.init(rawValue:))
+        return values.isEmpty ? [desk] : values
+    }
+
     var host: String {
         URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") ?? ""
     }
@@ -126,6 +131,8 @@ struct FeedCacheUpdate {
     var url: String
     var etag: String?
     var lastModified: String?
+    var body: Data? = nil
+    var observedAt: Date? = nil
 }
 
 struct DeskResult: Identifiable {
@@ -173,7 +180,7 @@ struct ConditionalResponse {
 
 enum Net {
     static func data(from url: URL, timeout: TimeInterval = 14, accept: String = "*/*") async throws -> Data {
-        var request = URLRequest(url: url, timeoutInterval: timeout)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -189,7 +196,7 @@ enum Net {
         timeout: TimeInterval = 14,
         accept: String = "*/*"
     ) async throws -> ConditionalResponse {
-        var request = URLRequest(url: url, timeoutInterval: timeout)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         if let etag, !etag.isEmpty {
@@ -240,23 +247,29 @@ enum HTMLText {
 }
 
 enum CanonicalURL {
-    static func fingerprint(_ raw: String) -> String {
-        guard var components = URLComponents(string: raw) else { return raw.lowercased() }
-        components.scheme = components.scheme?.lowercased()
-        components.host = components.host?.lowercased()
-        components.fragment = nil
-        components.user = nil
-        components.password = nil
-        if let items = components.queryItems {
-            components.queryItems = items.filter { item in
-                let name = item.name.lowercased()
-                return !(name.hasPrefix("utm_") || name == "fbclid" || name == "gclid" || name == "ocid")
+    /// Identity v2. Query order, duplicate keys, flags, plus signs and path slashes are significant.
+    static func fingerprint(_ input: String) -> String {
+        let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: raw), let scheme = components.scheme?.lowercased(),
+            ["http", "https"].contains(scheme), var host = components.url?.host?.lowercased(), !host.isEmpty else { return raw }
+        if host.contains(":") && !host.hasPrefix("[") { host = "[" + host + "]" }
+        if let port = components.port, !((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) { host += ":\(port)" }
+        func uppercaseEscapes(_ value: String) -> String {
+            let regex = try! NSRegularExpression(pattern: "%[0-9a-fA-F]{2}")
+            var result = value
+            for match in regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).reversed() {
+                if let range = Range(match.range, in: result) { result.replaceSubrange(range, with: String(result[range]).uppercased()) }
             }
-            if components.queryItems?.isEmpty == true { components.queryItems = nil }
+            return result
         }
-        var result = components.string ?? raw
-        if result.hasSuffix("/") { result.removeLast() }
-        return result
+        let path = components.percentEncodedPath == "/" ? "" : uppercaseEscapes(components.percentEncodedPath)
+        let fields = (components.percentEncodedQuery ?? "").split(separator: "&", omittingEmptySubsequences: false).filter { field in
+            let rawName = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            let name = (rawName.removingPercentEncoding ?? rawName).lowercased()
+            return !(name.hasPrefix("utm_") || ["fbclid", "gclid", "ocid"].contains(name))
+        }.map { uppercaseEscapes(String($0)) }
+        let query = fields.joined(separator: "&")
+        return scheme + "://" + host + path + (query.isEmpty ? "" : "?" + query)
     }
 }
 

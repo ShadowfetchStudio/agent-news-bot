@@ -71,6 +71,9 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
     for url, label in RSS_FEEDS.get(desk, []):
         try:
             etag, last_mod = store.feed_cache(url)
+            document = store.feed_document(url)
+            if document is None:
+                etag, last_mod = None, None
             cond: dict[str, str] = {}
             if etag:
                 cond["If-None-Match"] = etag
@@ -82,10 +85,20 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
                 extra_headers=cond,
             )
             if resp.status_code == 304:
-                continue
-            resp.raise_for_status()
-            cache_updates.append((url, resp.headers.get("ETag"), resp.headers.get("Last-Modified")))
-            parsed = feedparser.parse(resp.content)
+                if document is None:
+                    raise ValueError("304 response without cached feed")
+                body, observed_at = document
+            else:
+                resp.raise_for_status()
+                body = resp.content
+                observed_at = document[1] if document and document[0] == body else datetime.now(timezone.utc).timestamp()
+            if len(body) > 4 * 1024 * 1024:
+                raise ValueError("feed exceeds 4 MiB")
+            parsed = feedparser.parse(body)
+            if not parsed.version:
+                raise ValueError("invalid feed")
+            if resp.status_code != 304:
+                cache_updates.append((url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"), body, observed_at))
             for entry in parsed.entries:
                 link = canonical_url(getattr(entry, "link", "") or "")
                 if not link or "news.google.com" in link:
@@ -99,7 +112,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
                     or getattr(entry, "updated", None)
                     or getattr(entry, "created", None)
                 )
-                if not store.within_lookback(published, lookback):
+                if not store.within_lookback(published or datetime.fromtimestamp(observed_at, timezone.utc), lookback):
                     skipped_old += 1
                     continue
                 title = strip_html(getattr(entry, "title", "") or "")
@@ -121,6 +134,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
                         tweet=tweet,
                         tweet_chars=chars,
                         hashtags=tag_list,
+                        extra={"observed_at": iso(datetime.fromtimestamp(observed_at, timezone.utc))},
                     )
                 )
         except Exception as exc:
@@ -464,7 +478,7 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
             {
                 "desk": r.desk,
                 "title": DESK_TITLES.get(r.desk, r.desk),
-                "fresh": sum(a["desk"] == r.desk for a in articles),
+                "fresh": sum(r.desk in a.get("desks", [a["desk"]]) for a in articles),
                 "skipped_old": r.skipped_old,
                 "skipped_dup": r.skipped_dup,
                 "errors": r.source_errors,
@@ -472,6 +486,6 @@ def fetch_all(store: FreshnessStore) -> dict[str, Any]:
             for r in results
         ],
         "categories": {
-            DESK_TITLES.get(r.desk, r.desk): [a for a in articles if a["desk"] == r.desk] for r in results
+            DESK_TITLES.get(r.desk, r.desk): [a for a in articles if r.desk in a.get("desks", [a["desk"]])] for r in results
         },
     }

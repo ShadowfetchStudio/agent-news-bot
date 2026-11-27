@@ -16,6 +16,23 @@ import Security
             try output(["write_failed": writeFailed, "read_failed": readFailed, "deletes": deletes, "adds": adds])
             return
         }
+        if args[1] == "canonical-fixtures" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [[String: String]]
+            try output(["items": rows.map { ["canonical": CanonicalURL.fingerprint($0["raw"]!), "id": FreshnessStore.articleID(url: $0["raw"]!, fallback: "")] }]); return
+        }
+        if args[1] == "rss-parse" {
+            do {
+                let items = try RSSParser.parseChecked(data: Data(contentsOf: URL(fileURLWithPath: args[2])))
+                try output(["items": items.map { ["title": $0.title, "url": $0.link, "summary": HTMLText.strip($0.summary)] }])
+            } catch { try output(["error": "invalid feed"]) }
+            return
+        }
+        if args[1] == "rss" {
+            let store = FreshnessStore(path: URL(fileURLWithPath: args[3]))
+            let result = await RSSClient.fetch(desk: .science, lookbackHours: Double(args[4])!, maxItems: Int(args[5])!, store: store, feeds: [FeedSource(url: args[2], label: "Fixture")])
+            for update in result.cacheUpdates { store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt) }
+            try output(["articles": result.articles.map(\.wire), "errors": result.sourceErrors]); return
+        }
         if args[1] == "fetch" {
             let results = await WorldMonitorClient.fetch(enabled: true, base: args[2], key: "test-fixture-key", variant: "tech", lookback: 100000, limit: 20)
             try output(["articles": results.flatMap(\.articles).map(\.wire), "errors": results.flatMap(\.sourceErrors)])
@@ -81,6 +98,8 @@ import Security
             while !Task.isCancelled { try await Task.sleep(nanoseconds: 1_000_000_000) }
             return
         }
+        if args[1] == "story" { try output(["story": store.story(args[3]) ?? [:]]); return }
+        if args[1] == "revisions" { try output(["revisions": store.revisions(args[3])]); return }
         if args[1] == "pending" { try output(store.pending(consumer: args[3])); return }
         if args[1] == "ack" { try output(store.acknowledge(consumer: args[3], through: Int(args[4])!)); return }
     }

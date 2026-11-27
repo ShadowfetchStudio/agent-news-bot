@@ -174,5 +174,5 @@ class DeskResult:
     skipped_old: int = 0
     skipped_dup: int = 0
     source_errors: list[str] = field(default_factory=list)
-    feed_cache_updates: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+    feed_cache_updates: list[tuple[str, str | None, str | None, bytes, float]] = field(default_factory=list)
     quote_updates: list[tuple[str, str]] = field(default_factory=list)

@@ -155,6 +155,20 @@ final class AgentBridge: @unchecked Sendable {
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
+        } else if path.hasPrefix("/v1/stories/") {
+            let parts = path.split(separator: "/").map(String.init)
+            if method != "GET" { response = json(405, ["error": "method not allowed"]) }
+            else if let stories, parts.count == 3 || (parts.count == 4 && parts[3] == "revisions") {
+                do {
+                    if let story = try stories.story(parts[2]) {
+                        if parts.count == 4 {
+                            guard let limit = Int(queryItems.first { $0.name == "limit" }?.value ?? "50") else { throw StoryStore.Failure.invalidLimit }
+                            response = json(200, ["story_id": parts[2], "revisions": try stories.revisions(parts[2], limit: limit)])
+                        } else { response = json(200, ["story": story]) }
+                    } else { response = json(404, ["error": "story not found"]) }
+                } catch StoryStore.Failure.invalidLimit { response = json(400, ["error": "limit must be 1-100"]) }
+                catch { response = json(503, ["error": "story storage unavailable"]) }
+            } else { response = json(404, ["error": "not found"]) }
         } else if path == "/v1/events" || path == "/v1/events/ack" {
             if method != (path == "/v1/events" ? "GET" : "POST") {
                 response = json(405, ["error": "method not allowed"])
@@ -177,7 +191,7 @@ final class AgentBridge: @unchecked Sendable {
             } else {
                 var items = articlesProvider()
                 if let desk = queryItems.first(where: { $0.name == "desk" })?.value, !desk.isEmpty {
-                    items = items.filter { $0.desk.rawValue == desk }
+                    items = items.filter { $0.desks.contains { $0.rawValue == desk } }
                 }
                 if let rawLimit = queryItems.first(where: { $0.name == "limit" })?.value, !rawLimit.isEmpty {
                     guard let parsed = Int(rawLimit), parsed >= 0 else {

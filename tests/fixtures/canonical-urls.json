@@ -1,0 +1,21 @@
+[
+  {"raw":"HTTPS://Example.COM/news/story/?utm_source=x&id=42&fbclid=abc#frag","canonical":"https://example.com/news/story/?id=42"},
+  {"raw":"https://example.com:8443/story","canonical":"https://example.com:8443/story"},
+  {"raw":"https://example.com:9443/story","canonical":"https://example.com:9443/story"},
+  {"raw":"https://example.com:443/story","canonical":"https://example.com/story"},
+  {"raw":"http://example.com:80/","canonical":"http://example.com"},
+  {"raw":"http://example.com:443/","canonical":"http://example.com:443"},
+  {"raw":"https://example.com/story/?id=42","canonical":"https://example.com/story/?id=42"},
+  {"raw":"https://example.com/story?id=42","canonical":"https://example.com/story?id=42"},
+  {"raw":"https://example.com/?a=&flag&a=2+3&UTM_source=x","canonical":"https://example.com?a=&flag&a=2+3"},
+  {"raw":"https://example.com/?q=one%20two&q=one+two&k=%2f","canonical":"https://example.com?q=one%20two&q=one+two&k=%2F"},
+  {"raw":"https://example.com/%7euser/","canonical":"https://example.com/%7Euser/"},
+  {"raw":"https://user:password@example.com/path#section","canonical":"https://example.com/path"},
+  {"raw":"http://[::1]:8080/a/","canonical":"http://[::1]:8080/a/"},
+  {"raw":"http://[::1]:80/a/","canonical":"http://[::1]/a/"},
+  {"raw":"https://BÜCHER.example/路径/?q=one+two","canonical":"https://xn--bcher-kva.example/%E8%B7%AF%E5%BE%84/?q=one+two"},
+  {"raw":"https://faß.de/","canonical":"https://xn--fa-hia.de"},
+  {"raw":"https://example.com/?%75tm_medium=email&x=1","canonical":"https://example.com?x=1"},
+  {"raw":"  https://example.com/a b?x=hello world  ","canonical":"https://example.com/a%20b?x=hello%20world"},
+  {"raw":"https://example.com/?filter[]=a&filter[]=b","canonical":"https://example.com?filter%5B%5D=a&filter%5B%5D=b"}
+]

@@ -22,8 +22,8 @@ from agent_newsbot import config, hashtags, server, store  # noqa: E402
 
 def test_canonical_url_strips_tracking_and_normalizes() -> None:
     raw = "HTTPS://Example.COM/news/story/?utm_source=x&id=42&fbclid=abc&gclid=def#frag"
-    assert store.canonical_url(raw) == "https://example.com/news/story?id=42"
-    assert store.article_id(raw, "fallback") == store.article_id("https://example.com/news/story?id=42", "other")
+    assert store.canonical_url(raw) == "https://example.com/news/story/?id=42"
+    assert store.article_id(raw, "fallback") == store.article_id("https://example.com/news/story/?id=42", "other")
 
 
 def test_freshness_store_seen_quotes_cache_and_prune(tmp_path: Path) -> None:

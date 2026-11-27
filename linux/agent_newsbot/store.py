@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+from contextlib import contextmanager
 import html
 import re
 import sqlite3
@@ -8,25 +10,41 @@ import threading
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote, unquote
+import idna
 
 from .config import HOME
 
 
 def canonical_url(raw: str) -> str:
+    """Identity v2: preserve path/query semantics and significant ports."""
+    raw = raw.strip()
     try:
-        parts = urlsplit(raw.strip())
-    except ValueError:
-        return raw.lower()
-    query = [
-        (k, v)
-        for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if not k.lower().startswith("utm_") and k.lower() not in {"fbclid", "gclid", "ocid"}
-    ]
-    host = (parts.hostname or "").lower()
-    path = parts.path.rstrip("/")
-    rebuilt = urlunsplit((parts.scheme.lower(), host, path, urlencode(query), ""))
-    return rebuilt
+        p = urlsplit(raw)
+        scheme = p.scheme.lower()
+        host = (p.hostname or "").lower()
+        if not host or scheme not in ("http", "https"):
+            return raw
+        if ":" in host:
+            host = "[" + host + "]"
+        elif not host.isascii():
+            host = idna.encode(host, uts46=True).decode()
+        port = p.port
+        if port is not None and (scheme, port) not in (("http", 80), ("https", 443)):
+            host += ":" + str(port)
+        def escaped(value, safe):
+            value = re.sub(r"%(?![0-9A-Fa-f]{2})", "%25", value)
+            value = quote(value, safe=safe + "%")
+            return re.sub(r"%[0-9a-fA-F]{2}", lambda m: m[0].upper(), value)
+        path = "" if p.path == "/" else escaped(p.path, "/:@!$&'()*+,;=-._~")
+        fields = []
+        for field in p.query.split("&") if p.query else []:
+            name = unquote(field.split("=", 1)[0]).lower()
+            if not name.startswith("utm_") and name not in {"fbclid", "gclid", "ocid"}:
+                fields.append(escaped(field, "!$&'()*+,-./:;=?@_~"))
+        return urlunsplit((scheme, host, path, "&".join(fields), ""))
+    except (ValueError, idna.IDNAError, UnicodeError):
+        return raw
 
 
 def article_id(url: str, fallback: str) -> str:
@@ -90,6 +108,7 @@ class FreshnessStore:
                     payload TEXT,
                     updated_at REAL
                 );
+                CREATE TABLE IF NOT EXISTS feed_documents (url TEXT PRIMARY KEY, body TEXT NOT NULL, observed_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS feed_cache (
                     url TEXT PRIMARY KEY,
                     etag TEXT,
@@ -99,10 +118,15 @@ class FreshnessStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         db = sqlite3.connect(self.path, timeout=30)
         db.execute("PRAGMA journal_mode=WAL")
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def has_seen(self, item_id: str) -> bool:
         with self._lock, self._connect() as db:
@@ -136,7 +160,7 @@ class FreshnessStore:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         if published.tzinfo is None:
             published = published.replace(tzinfo=timezone.utc)
-        return published >= cutoff
+        return cutoff <= published <= datetime.now(timezone.utc) + timedelta(minutes=5)
 
     def prune_seen(self, older_than_days: float = 30.0) -> int:
         cutoff = datetime.now(timezone.utc).timestamp() - older_than_days * 86_400
@@ -152,15 +176,32 @@ class FreshnessStore:
                 return None, None
             return (row[0] or None), (row[1] or None)
 
-    def save_feed_cache(self, url: str, etag: str | None, last_modified: str | None) -> None:
-        if not etag and not last_modified:
-            return
+    def feed_document(self, url: str) -> tuple[bytes, float] | None:
         with self._lock, self._connect() as db:
+            row = db.execute("SELECT body,observed_at FROM feed_documents WHERE url=?", (url,)).fetchone()
+            if not row:
+                return None
+            try:
+                return base64.b64decode(row[0], validate=True), row[1]
+            except ValueError:
+                return None
+
+    def save_feed_cache(self, url: str, etag: str | None, last_modified: str | None,
+                        body: bytes | None = None, observed_at: float | None = None) -> None:
+        if body is not None and len(body) > 4 * 1024 * 1024:
+            raise ValueError("feed exceeds 4 MiB")
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT OR REPLACE INTO feed_cache(url, etag, last_modified, updated_at) VALUES (?,?,?,?)",
                 (url, etag or "", last_modified or "", datetime.now(timezone.utc).timestamp()),
             )
-            db.commit()
+            if body is None:
+                db.execute("DELETE FROM feed_documents WHERE url=?", (url,))
+            else:
+                db.execute("INSERT OR REPLACE INTO feed_documents VALUES (?,?,?)",
+                    (url, base64.b64encode(body).decode(), observed_at if observed_at is not None else datetime.now(timezone.utc).timestamp()))
+
 
 
 _TITLE_STOP = {

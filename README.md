@@ -87,30 +87,19 @@ work independently. See [World Monitor integration and durable delivery](docs/wo
 
 ## Architecture
 
-```
-                 ┌────────────────────────────────────────────┐
-                 │  Fetch engine (per desk, run concurrently)   │
-                 │  RSS/Atom · HN Firebase · Polymarket Gamma   │
-                 │  Yahoo Finance · Open-Meteo                  │
-                 └───────────────┬──────────────────────────────┘
-                                 │ normalize → dedupe → tag → tweet
-                                 ▼
-                 ┌────────────────────────────────────────────┐
-                 │  Freshness ledger (SQLite: seen + quotes)    │
-                 │  canonical-URL SHA-256 id · lookback window  │
-                 └───────────────┬──────────────────────────────┘
-                                 │ fresh batch (snapshot)
-                                 ▼
-        ┌────────────────────────┴────────────────────────┐
-        │  Bridge  (HTTP on 127.0.0.1, bearer-token auth)   │
-        │  GET /health  /v1/fresh  /v1/desks  /v1/status    │
-        │  POST /v1/fetch                                    │
-        └───────┬─────────────────────────────┬─────────────┘
-                │                               │
-     macOS: SwiftUI UI + JSON export     Linux: latest.json snapshot file
-                │                               │
-                ▼                               ▼
-         agents / scripts read the same JSON contract
+```mermaid
+flowchart TD
+    RSS[RSS and Atom feeds] --> Cache[Recoverable feed cache]
+    Direct[HN, markets, forecasts and prediction markets] --> Normalize[Normalize and group observations]
+    Cache --> Normalize
+    WM[Optional World Monitor digest] --> Normalize
+    Normalize --> Journal[SQLite stories, provider observations and revisions]
+    Journal --> Snapshot[Fresh snapshot and exports]
+    Journal --> Events[Per-consumer event delivery and acknowledgement]
+    Journal --> History[Current story and revision lookup]
+    Snapshot --> UI[Native Mac newsroom or Linux service]
+    Events --> Agents[Agents and research workflows]
+    History --> UI
 ```
 
 **macOS implementation (`Sources/`, Swift/SwiftUI):**
@@ -143,12 +132,13 @@ An article identity is derived from its canonical URL. Tracking parameters are r
 Recent similar headlines are grouped heuristically into a story, with every source retained.
 Grouping is not independent verification: syndicated copies can describe the same event.
 
-`stories.sqlite` stores the latest story, source metadata, and an ordered journal of immutable
-revisions. A new source or changed title/summary creates an update; changing provider scores,
-collection timestamps or mention counts alone does not. World Monitor snippets do not overwrite
-a direct RSS summary at the same URL. Provider assessments retain their provenance and are not
-promoted to verified facts. Stories and events are retained until explicitly managed by the operator;
-there is no automatic event-history pruning in this first version.
+`stories.sqlite` stores current stories, separate provider observations and immutable revisions.
+Each ingestion transaction emits one complete revision per changed story. Editorial changes produce
+updates; stable context/provenance produces enrichment events. Score/count/time-only changes update
+current state without event spam. New substantive observations can replace older headlines while
+alternate reports remain visible. Multiple desk memberships and disagreement flags aid review.
+See [the story model and migration contract](docs/STORY_MODEL.md) for selection rules and limitations.
+Stories and events currently remain until explicitly managed; automated retention is a release task.
 
 `GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.
 Linux may retain still-fresh items when a desk has no changes. For durable delivery use
@@ -173,6 +163,8 @@ without a valid token or `405` on disallowed HTTP methods.
 | `GET /health` | no | Liveness probe; returns app name + bridge URL. |
 | `GET /v1/fresh?desk=<desk>&limit=<n>` | yes | The current fresh batch. Optional `desk` filter and `limit` (default 100, max 500; `400` on invalid value). |
 | `GET /v1/articles/<id>` | yes | Fetch a single article from the current batch by its 24-hex id (`404` if absent). |
+| `GET /v1/stories/<id>` | yes | Current durable story, even when absent from the fresh batch. Accepts recorded identity aliases. |
+| `GET /v1/stories/<id>/revisions?limit=50` | yes | Recorded revisions with before/after differences (1–100). |
 | `GET /v1/events?consumer=<name>&limit=<n>` | yes | Durable ordered revisions after that consumer's acknowledged cursor (limit 1–500). |
 | `POST /v1/events/ack?consumer=<name>&through=<seq>` | yes | Acknowledge a delivered prefix; cannot advance past events offered to that consumer. |
 | `GET /v1/desks` | yes | Per-desk counts: fresh, skipped-old, skipped-dup, and source errors. |

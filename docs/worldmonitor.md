@@ -10,8 +10,8 @@ This feature does not install or start a World Monitor server, subscribe to a pl
 
 **macOS:** build the app with `./build.sh --arch arm64`, open the built bundle, then Settings →
 World Monitor. Enable the connector, set the server origin and edition, and enter a key if the
-server requires one. Closing Settings saves the key to Keychain and the other settings to
-UserDefaults. Fetch Fresh performs a digest request. Source links and revision labels are visible
+server requires one. Use **Credentials → Save credential changes** to save the key to Keychain.
+Closing Settings saves ordinary preferences, but does not change credentials. Fetch Fresh performs a digest request. Source links and revision labels are visible
 in the story inspector. JSON exports and both bridge APIs contain the source groups.
 
 **Linux:** add these environment settings to the service's private environment file:
@@ -86,16 +86,19 @@ Back it up with SQLite's backup API (or stop the service and copy the database p
 
 Canonical URL identity is authoritative for source updates. Similar headline tokens can join a
 story among the 500 most recently observed groups within 48 hours. Financial quotes, forecasts
-and prediction markets are excluded from fuzzy grouping. Grouping is a heuristic and can merge
-or split incorrectly: multiple links are not proof of independent reporting. Revisions are created
-for added URLs or changed source titles/snippets, not score/count/timestamp-only provider changes.
-World Monitor's shortened snippet never replaces a direct RSS summary for the same URL.
-Provider metadata is refreshed in the current stored story; old event payloads remain immutable.
+and prediction markets are excluded from fuzzy grouping. Grouping is heuristic, not proof of
+independent reporting. See [Story identity, observations and revisions](STORY_MODEL.md).
 
-A batch may produce several ordered revisions of one story as its sources arrive; the fresh
-snapshot shows the last substantive revision. `sources[].providers` distinguishes direct
-collection from World Monitor. Assessments remain under `sources[].metadata`; unassessed
-credibility stays explicitly marked. Nothing is automatically verified or published.
+A batch emits one complete revision per changed story after all source observations are processed.
+`sources[].observations` retains each provider's report; `selected_provider` identifies the selected
+headline. A newer observed correction can supersede older direct text without an unchanged RSS item
+reverting it. Equal-generation ties prefer direct reporting and identical headlines retain the
+longer summary. Differing reports remain available for editorial review.
+
+Stable context changes emit `enriched` events. Score/count/time-only changes update current stored
+state without an event; use `GET /v1/stories/<id>` to retrieve them. Use
+`GET /v1/stories/<id>/revisions` for history and before/after differences. Old event payloads remain
+immutable. Nothing is automatically verified or published.
 
 ## Tests
 

@@ -29,6 +29,7 @@ final class FreshnessStore: @unchecked Sendable {
                 payload TEXT,
                 updated_at REAL
             );
+            CREATE TABLE IF NOT EXISTS feed_documents (url TEXT PRIMARY KEY, body TEXT NOT NULL, observed_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS feed_cache (
                 url TEXT PRIMARY KEY,
                 etag TEXT,
@@ -129,24 +130,42 @@ final class FreshnessStore: @unchecked Sendable {
         return (etag, lm)
     }
 
-    func saveFeedCache(_ url: String, etag: String?, lastModified: String?) {
-        guard etag != nil || lastModified != nil else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        exec(
-            "INSERT OR REPLACE INTO feed_cache(url, etag, last_modified, updated_at) VALUES (?,?,?,?)",
-            bind: { stmt in
-                self.bind(stmt, 1, url)
-                self.bind(stmt, 2, etag ?? "")
-                self.bind(stmt, 3, lastModified ?? "")
-                sqlite3_bind_double(stmt, 4, Date().timeIntervalSince1970)
+    func feedDocument(_ url: String) -> (data: Data, observedAt: Date)? {
+        lock.lock(); defer { lock.unlock() }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT body,observed_at FROM feed_documents WHERE url=?", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        bind(stmt, 1, url)
+        guard sqlite3_step(stmt) == SQLITE_ROW, let raw = sqlite3_column_text(stmt, 0),
+            let data = Data(base64Encoded: String(cString: raw)) else { return nil }
+        return (data, Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1)))
+    }
+
+    func saveFeedCache(_ url: String, etag: String?, lastModified: String?, body: Data? = nil, observedAt: Date? = nil) {
+        guard body == nil || body!.count <= 4 * 1024 * 1024 else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard exec("BEGIN IMMEDIATE") else { return }
+        let markerSaved = exec("INSERT OR REPLACE INTO feed_cache(url,etag,last_modified,updated_at) VALUES (?,?,?,?)") { stmt in
+            self.bind(stmt, 1, url); self.bind(stmt, 2, etag ?? ""); self.bind(stmt, 3, lastModified ?? "")
+            sqlite3_bind_double(stmt, 4, Date().timeIntervalSince1970)
+        }
+        let bodySaved: Bool
+        if let body {
+            bodySaved = exec("INSERT OR REPLACE INTO feed_documents VALUES (?,?,?)") { stmt in
+                self.bind(stmt, 1, url); self.bind(stmt, 2, body.base64EncodedString())
+                sqlite3_bind_double(stmt, 3, (observedAt ?? Date()).timeIntervalSince1970)
             }
-        )
+        } else {
+            bodySaved = exec("DELETE FROM feed_documents WHERE url=?") { self.bind($0, 1, url) }
+        }
+        if markerSaved && bodySaved {
+            if !exec("COMMIT") { exec("ROLLBACK") }
+        } else { exec("ROLLBACK") }
     }
 
     func isWithinLookback(_ published: Date?, hours: Double) -> Bool {
         guard let published else { return true }
-        return published >= Date().addingTimeInterval(-hours * 3600)
+        return published >= Date().addingTimeInterval(-hours * 3600) && published <= Date().addingTimeInterval(300)
     }
 
     static func articleID(url: String, fallback: String) -> String {
@@ -179,12 +198,12 @@ final class FreshnessStore: @unchecked Sendable {
         sqlite3_bind_text(stmt, idx, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
     }
 
-    private func exec(_ sql: String, bind: ((OpaquePointer?) -> Void)? = nil) {
-        guard db != nil else { return }
+    @discardableResult private func exec(_ sql: String, bind: ((OpaquePointer?) -> Void)? = nil) -> Bool {
+        guard db != nil else { return false }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
         bind?(stmt)
-        sqlite3_step(stmt)
-        sqlite3_finalize(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 }

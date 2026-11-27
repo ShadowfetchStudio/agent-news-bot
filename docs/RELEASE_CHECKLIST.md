@@ -6,13 +6,13 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 
 - [x] B01: disconnected native clients cannot terminate the app; bounded responses.
 - [x] B02: deterministic listener lifecycle; occupied replacement port preserves service; accurate Settings status.
-- [ ] B03: enrichment reaches current stories and consumers without score churn.
-- [ ] B04: newer corrections survive provider precedence; versioned observations.
-- [ ] B05: unchanged RSS feeds recover candidates after cap/lookback changes.
+- [x] B03: enrichment reaches current stories and consumers without score churn.
+- [x] B04: newer corrections survive provider precedence; versioned observations.
+- [x] B05: unchanged RSS feeds recover candidates after cap/lookback changes.
 - [x] B06: quote checkpoints correspond to persisted observations.
 - [x] B07: truthful asynchronous fetch completion, concurrency and failure semantics on both runtimes.
-- [ ] B08: installed Linux CLI works outside checkout and finds service state.
-- [ ] B09: shared URL canonicalization fixtures and existing identity migration.
+- [x] B08: installed Linux CLI works outside checkout and finds service state.
+- [x] B09: shared URL canonicalization fixtures and existing identity migration.
 - [ ] B10: source failure never appears as current coverage.
 - [x] B11: unknown dates and restored snapshots expire deterministically.
 - [ ] B12: X weighted Unicode/URL counting and parity fixtures.
@@ -69,3 +69,14 @@ Do not mark items complete until their behavior and required verification are re
 These checked defects are repair milestones, not a release approval. Remaining checkboxes and final end-to-end tests are still required.
 
 Validation snapshot for this batch: 58 tests passed on macOS; 47 passed with 11 native-Mac skips on Pop!_OS. The final fetch-job terminal-state locking adjustment passed all four cross-runtime fetch-job tests. The Apple Silicon app builds and passes strict ad-hoc signature verification. Existing Hermes/OpenClaw concurrency warnings remain explicitly open. A Linux wheel was built and installed in an isolated venv, and its console entry point ran from `/tmp` with no PYTHONPATH. This development wheel is not the final release asset.
+
+## Repair batch 2 evidence
+
+- One complete revision per changed story/transaction, with separate versioned provider observations. Swift and Python fixtures verify same-cycle enrichment delivery, later enrichment events, quiet score-only updates, correction persistence after unchanged RSS returns, multiple desk memberships and disagreement flags.
+- Current story and revision-diff API routes tested over actual HTTP in both runtimes, including missing IDs, authorization and invalid limits. Mac inspector now renders provider observations and a revision timeline; visual/accessibility sign-off remains open.
+- Recoverable RSS body caching tested against a real local 200/304 server on both runtimes. Widening lookback and increasing caps recover previously excluded stories. Legacy validator-only caches trigger a full fetch. Cache body/marker updates are transactional and follow journal persistence.
+- Shared 19-case URL fixtures cover significant/default ports, IPv6, IDNA, path slashes, query order, duplicate keys, flags, spaces, escape case and tracking removal. Migration tests retain original story IDs and immutable events while resolving new aliases. Previously discarded URL information is explicitly documented as unrecoverable.
+- Native Atom parser regressions verify alternate article links, nested summary text, source-title isolation, and rejection of HTML/error or malformed documents. Python freshness-store connections now close deterministically.
+- Validation: 73 tests passed on macOS; 54 passed and 19 Mac-specific skips on native Pop!_OS. The Apple Silicon app built and passed strict ad-hoc signature verification. Existing native agent CLI concurrency warnings remain on the release checklist.
+
+Remaining larger work includes weighted X counting, complete coverage/count reporting, setup and credential rotation, Mac refresh/restoration, searchable history/watchlists/editorial exports, consumer controls and maintenance/upgrade tooling, followed by final packaging and GitHub publication.

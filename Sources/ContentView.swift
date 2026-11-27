@@ -28,7 +28,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 ForEach(Desk.allCases) { desk in
                     if engine.settings.enabledDesks.contains(desk) {
-                        let count = engine.articles.filter { $0.desk == desk }.count
+                        let count = engine.articles.filter { $0.desks.contains(desk) }.count
                         NavigationLink(value: desk) {
                             Label {
                                 HStack {
@@ -116,7 +116,7 @@ struct ContentView: View {
             if let article = engine.selected ?? engine.filtered.first {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text(article.desk.title.uppercased())
+                        Text(article.desks.map(\.title).joined(separator: " · ").uppercased())
                             .font(.caption.weight(.bold))
                             .foregroundStyle(Theme.gold)
                         Text(article.title)
@@ -128,6 +128,12 @@ struct ContentView: View {
                             Text(article.summary)
                                 .foregroundStyle(Theme.textMed)
                                 .textSelection(.enabled)
+                        }
+                        if article.wire["disagreement"] as? Bool == true {
+                            Label("Reports differ — review before use", systemImage: "exclamationmark.triangle.fill")
+                                .font(.headline).foregroundStyle(Theme.warning)
+                            Text("Provider headlines or related reports disagree. This is a review flag, not a verdict about which report is correct.")
+                                .font(.caption).foregroundStyle(Theme.textMed)
                         }
                         if let revision = article.wire["revision"] as? Int {
                             Text("Revision \(revision) · \(article.wire["change"] as? String ?? "new")")
@@ -145,6 +151,22 @@ struct ContentView: View {
                                        ["https", "http"].contains(url.scheme ?? "") {
                                         Link(source["source"] as? String ?? raw, destination: url)
                                         Text(source["title"] as? String ?? "").font(.caption)
+                                        let observations = source["observations"] as? [String: [String: Any]] ?? [:]
+                                        if !observations.isEmpty {
+                                            DisclosureGroup("Provider observations") {
+                                                ForEach(observations.keys.sorted(), id: \.self) { provider in
+                                                    let observation = observations[provider] ?? [:]
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text(provider == "worldmonitor" ? "World Monitor" : provider.capitalized).font(.caption.bold())
+                                                        Text(observation["title"] as? String ?? "").font(.caption)
+                                                        Text(observation["summary"] as? String ?? "").font(.caption).foregroundStyle(Theme.textMed)
+                                                        if provider == source["selected_provider"] as? String {
+                                                            Text("Selected headline").font(.caption2).foregroundStyle(Theme.aqua)
+                                                        }
+                                                    }.padding(.vertical, 4).textSelection(.enabled)
+                                                }
+                                            }
+                                        }
                                         if let metadata = source["metadata"] as? [String: Any],
                                            let location = metadata["locationName"] as? String, !location.isEmpty {
                                             Text("World Monitor location: \(location)").font(.caption).foregroundStyle(Theme.textLow)
@@ -153,6 +175,7 @@ struct ContentView: View {
                                 }
                             }.padding(10).anbCard()
                         }
+                        StoryHistoryView(store: engine.stories, storyID: article.id, revision: article.wire["revision"] as? Int ?? 0)
                         FlowTags(tags: article.hashtags)
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {

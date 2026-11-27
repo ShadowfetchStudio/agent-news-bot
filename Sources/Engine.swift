@@ -70,7 +70,7 @@ final class NewsEngine: ObservableObject {
     var filtered: [Article] {
         var items = articles
         if let desk = selectedDesk {
-            items = items.filter { $0.desk == desk }
+            items = items.filter { $0.desks.contains(desk) }
         }
         let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !q.isEmpty {
@@ -180,14 +180,14 @@ final class NewsEngine: ObservableObject {
         catch { status = "Story storage failed. No deliveries acknowledged; retry the fetch."; return }
         for result in results {
             for update in result.cacheUpdates {
-                store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified)
+                store.saveFeedCache(update.url, etag: update.etag, lastModified: update.lastModified, body: update.body, observedAt: update.observedAt)
             }
             for (symbol, payload) in result.quoteUpdates { store.saveQuote(symbol, payload: payload) }
         }
         for article in candidates {
             store.mark(id: article.id, url: article.url, title: article.title, desk: article.desk.rawValue)
         }
-        for i in results.indices { results[i].articles = merged.filter { $0.desk == results[i].desk } }
+        for i in results.indices { results[i].articles = merged.filter { $0.desks.contains(results[i].desk) } }
         merged.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         store.pruneSeen(olderThanDays: 30)
 
@@ -268,7 +268,7 @@ final class NewsEngine: ObservableObject {
             "articles": articles.map(\.wire),
             "lookback_hours": settings.lookbackHours,
             "categories": Dictionary(uniqueKeysWithValues: Desk.allCases.map { desk in
-                (desk.title, articles.filter { $0.desk == desk }.map(\.wire))
+                (desk.title, articles.filter { $0.desks.contains(desk) }.map(\.wire))
             })
         ]
         let name = "agentnewsbot_\(Int(Date().timeIntervalSince1970)).json"
@@ -331,7 +331,9 @@ final class NewsEngine: ObservableObject {
         - `GET /v1/fresh?desk=<desk>&limit=<n>` — repeatable current snapshot
         - `GET /v1/events?consumer=<name>` — persistent ordered revisions
         - `POST /v1/events/ack?consumer=<name>&through=<next_cursor>` — acknowledge processed events only
-        - `GET /v1/articles/<id>` — single article lookup
+        - `GET /v1/articles/<id>` — single article in the fresh batch
+        - `GET /v1/stories/<id>` — current durable story and provider context
+        - `GET /v1/stories/<id>/revisions` — recorded revisions and differences
         - `GET /v1/desks` — per-desk counts and source errors
         - `GET /v1/status` — snapshot status
         - `POST /v1/fetch` — request refresh (202 accepted, 409 already running); poll /v1/status fetch_job for completion

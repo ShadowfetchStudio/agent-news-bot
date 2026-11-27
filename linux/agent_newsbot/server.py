@@ -162,10 +162,12 @@ class NewsState:
         categories: dict[str, list] = {}
         for item in kept:
             title = item.get("category") or item.get("desk")
-            categories.setdefault(title, []).append(item)
+            for desk_name in item.get("desks", [item.get("desk")]):
+                from .config import DESK_TITLES
+                categories.setdefault(DESK_TITLES.get(desk_name, desk_name), []).append(item)
         snapshot["categories"] = categories
         for desk in snapshot.get("desks") or []:
-            items = [item for item in kept if item.get("desk") == desk["desk"]]
+            items = [item for item in kept if desk["desk"] in item.get("desks", [item.get("desk")])]
             carried = sum(bool(item.get("carried")) for item in items)
             updated = sum(not item.get("carried") and item.get("change") in ("updated", "enriched", "corrected") for item in items)
             fresh = len(items) - carried
@@ -214,6 +216,24 @@ class Handler(BaseHTTPRequestHandler):
             self._send(401, {"error": "bearer token required"})
             return
         qs = parse_qs(parsed.query)
+        if path.startswith("/v1/stories/"):
+            parts = path.strip("/").split("/")
+            if len(parts) not in (3, 4) or (len(parts) == 4 and parts[3] != "revisions"):
+                self._send(404, {"error": "not found"}); return
+            try:
+                story = STATE.stories.story(parts[2])
+                if story is None:
+                    self._send(404, {"error": "story not found"})
+                elif len(parts) == 4:
+                    limit = int((qs.get("limit") or ["50"])[0])
+                    self._send(200, {"story_id": parts[2], "revisions": STATE.stories.revisions(parts[2], limit)})
+                else:
+                    self._send(200, {"story": story})
+            except ValueError:
+                self._send(400, {"error": "limit must be 1-100"})
+            except (sqlite3.Error, OSError):
+                self._send(503, {"error": "story storage unavailable"})
+            return
         if path == "/v1/events":
             try:
                 consumer = (qs.get("consumer") or [""])[0]
@@ -232,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                 articles = list(STATE.snapshot.get("articles") or [])
             desk = (qs.get("desk") or [None])[0]
             if desk:
-                articles = [a for a in articles if a.get("desk") == desk]
+                articles = [a for a in articles if desk in a.get("desks", [a.get("desk")])]
             raw_limit = (qs.get("limit") or ["100"])[0]
             try:
                 limit = int(raw_limit)

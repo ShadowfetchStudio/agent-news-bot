@@ -100,26 +100,25 @@ def test_redirect_does_not_forward_credentials(monkeypatch):
 def test_sources_revisions_restart_and_independent_delivery(tmp_path):
     path = tmp_path / "stories.sqlite"
     journal = StoryStore(path)
-    first = article()
-    second = article("https://second.example/a")
+    first = article(); second = article("https://second.example/a")
     new = journal.ingest([first, second])
-    assert len(new) == 1 and len(new[0]["sources"]) == 2 and new[0]["revision"] == 2
+    # A transaction delivers the complete grouped story once, not interim source additions.
+    assert len(new) == 1 and len(new[0]["sources"]) == 2 and new[0]["revision"] == 1
     assert journal.ingest([first, second]) == []
-    # Restart, then change a headline at the same URL: retain both sources.
     journal = StoryStore(path)
     first["title"] += ": mission delayed"
     update = journal.ingest([first])[0]
-    assert update["revision"] == 3 and update["change"] == "updated"
+    assert update["revision"] == 2 and update["change"] == "updated"
     assert len(update["sources"]) == 2
-    one = journal.pending("briefing", 2)
-    assert one == journal.pending("briefing", 2)
-    assert one["next_cursor"] == 2
-    assert journal.acknowledge("briefing", 2)["cursor"] == 2
+    one = journal.pending("briefing", 1)
+    assert one == journal.pending("briefing", 1)
+    assert one["next_cursor"] == 1
+    assert journal.acknowledge("briefing", 1)["cursor"] == 1
     assert journal.pending("briefing")["count"] == 1
-    assert journal.pending("video")["count"] == 3
-    assert StoryStore(path).pending("briefing")["cursor"] == 2
-    with pytest.raises(ValueError): journal.acknowledge("video", 4)
-    assert journal.acknowledge("briefing", 1)["cursor"] == 2
+    assert journal.pending("video")["count"] == 2
+    assert StoryStore(path).pending("briefing")["cursor"] == 1
+    with pytest.raises(ValueError): journal.acknowledge("video", 3)
+    assert journal.acknowledge("briefing", 0)["cursor"] == 1
 
 
 def test_provider_metadata_changes_do_not_create_editorial_updates(tmp_path):
@@ -168,7 +167,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "Freshness", "Hashtagger", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths"]
+    files = ["Models", "Freshness", "Hashtagger", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     return dest
 
@@ -196,13 +195,13 @@ def test_swift_persistent_updates_and_consumers(swift_harness, tmp_path):
     assert len(result["articles"]) == 1
     assert len(result["articles"][0]["sources"]) == 2
     assert swift(swift_harness, "ingest", db, data)["articles"] == []
-    assert swift(swift_harness, "pending", db, "a")["count"] == 2
-    assert swift(swift_harness, "ack", db, "a", 2)["cursor"] == 2
+    assert swift(swift_harness, "pending", db, "a")["count"] == 1
+    assert swift(swift_harness, "ack", db, "a", 1)["cursor"] == 1
     assert swift(swift_harness, "pending", db, "a")["count"] == 0
-    assert swift(swift_harness, "pending", db, "b")["count"] == 2
+    assert swift(swift_harness, "pending", db, "b")["count"] == 1
     rows[0]["summary"] = "A corrected report."
     data.write_text(json.dumps(rows))
-    assert swift(swift_harness, "ingest", db, data)["articles"][0]["revision"] == 3
+    assert swift(swift_harness, "ingest", db, data)["articles"][0]["revision"] == 2
     assert swift(swift_harness, "pending", db, "a")["count"] == 1
 
 
@@ -267,6 +266,13 @@ def test_real_http_consumer_delivery(runtime, request, tmp_path, monkeypatch):
         assert requests.get(base + "/v1/events?consumer=a", timeout=5).status_code == 401
         page = requests.get(base + "/v1/events?consumer=a", headers=headers, timeout=5).json()
         assert page["count"] == 1
+        story_id = page["events"][0]["story"]["id"]
+        detail = requests.get(base + "/v1/stories/" + story_id, headers=headers, timeout=5)
+        assert detail.status_code == 200 and detail.json()["story"]["id"] == story_id
+        history = requests.get(base + "/v1/stories/" + story_id + "/revisions", headers=headers, timeout=5)
+        assert history.status_code == 200 and len(history.json()["revisions"]) == 1
+        assert requests.get(base + "/v1/stories/" + story_id + "/revisions?limit=0", headers=headers, timeout=5).status_code == 400
+        assert requests.get(base + "/v1/stories/missing", headers=headers, timeout=5).status_code == 404
         assert requests.get(base + "/v1/events?consumer=a", headers=headers, timeout=5).json() == page
         assert requests.post(base + "/v1/events/ack?consumer=a&through=2", headers=headers, timeout=5).status_code == 400
         ack = requests.post(base + "/v1/events/ack?consumer=a&through=1", headers=headers, timeout=5)
@@ -292,7 +298,7 @@ def test_python_full_provider_http_ingestion(monkeypatch, tmp_path):
         result = engine.fetch_all(FreshnessStore(tmp_path / "seen.sqlite"))
         assert result["total_articles"] == 1
         assert len(result["articles"][0]["sources"]) == 2
-        assert StoryStore(tmp_path / "stories.sqlite").pending("video")["count"] == 2
+        assert StoryStore(tmp_path / "stories.sqlite").pending("video")["count"] == 1
         assert len(calls) == 1
 
 
@@ -528,3 +534,178 @@ def test_keychain_errors_do_not_erase_or_hide_credentials(swift_harness):
     assert swift(swift_harness, "keychain-failure") == {
         "write_failed": True, "read_failed": True, "deletes": 0, "adds": 0,
     }
+
+@pytest.fixture(params=["python", "swift"])
+def journal_runtime(request, tmp_path):
+    db = tmp_path / "journal.sqlite"
+    if request.param == "python":
+        return StoryStore(db)
+    binary = request.getfixturevalue("swift_harness")
+    class Native:
+        path = db
+        def ingest(self, rows):
+            data = tmp_path / "rows.json"; data.write_text(json.dumps(rows))
+            return swift(binary, "ingest", db, data)["articles"]
+        def pending(self, consumer): return swift(binary, "pending", db, consumer)
+        def story(self, story_id): return swift(binary, "story", db, story_id)["story"]
+        def revisions(self, story_id): return swift(binary, "revisions", db, story_id)["revisions"]
+    return Native()
+
+
+def test_enrichment_delivered_and_score_churn_stays_quiet(journal_runtime):
+    direct = article(summary="Full direct account with detail")
+    digest = article(summary="Short digest", provider="worldmonitor")
+    digest["extra"]["metadata"] = {"locationName": "Florida", "importanceScore": 80}
+    rows = journal_runtime.ingest([direct, digest])
+    event = journal_runtime.pending("test")["events"]
+    assert len(event) == 1 and len(rows) == 1
+    assert rows[0]["sources"][0]["metadata"]["locationName"] == "Florida"
+    assert event[0]["story"]["sources"] == rows[0]["sources"]
+    digest["extra"]["metadata"]["importanceScore"] = 85
+    assert journal_runtime.ingest([direct, digest]) == []
+    assert journal_runtime.story(rows[0]["id"])["sources"][0]["metadata"]["importanceScore"] == 85
+    digest["extra"]["metadata"]["locationName"] = "California"
+    enriched = journal_runtime.ingest([direct, digest])
+    assert enriched[0]["change"] == "enriched"
+    assert journal_runtime.pending("test")["count"] == 2
+
+
+def test_newer_provider_correction_does_not_revert_to_unchanged_rss(journal_runtime):
+    direct = article(summary="Full original reporting")
+    digest = article(provider="worldmonitor")
+    first = journal_runtime.ingest([direct, digest])[0]
+    digest["title"] = "NASA cancels lunar orbiter launch after engine failure"
+    digest["summary"] = "The launch has been cancelled."
+    corrected = journal_runtime.ingest([digest])[0]
+    assert corrected["title"] == digest["title"]
+    assert corrected["disagreement"] is True
+    assert journal_runtime.ingest([direct, digest]) == []
+    current = journal_runtime.story(first["id"])
+    assert current["title"] == digest["title"]
+    assert current["sources"][0]["observations"]["direct"]["title"] == direct["title"]
+    history = journal_runtime.revisions(first["id"])
+    assert len(history) == 2
+    assert history[-1]["diff"]["title"] == {"before": direct["title"], "after": digest["title"]}
+
+
+def test_desk_membership_and_disagreement_survive_grouping(journal_runtime):
+    first = article(title="NASA confirms lunar orbiter launch will proceed despite engine issue")
+    same = copy.deepcopy(first); same["desk"] = "tech"
+    other = article("https://second.example/report", title="NASA confirms lunar orbiter launch will not proceed despite engine issue")
+    story = journal_runtime.ingest([first, same, other])[0]
+    assert story["desks"] == ["science", "tech"]
+    assert story["disagreement"] is True
+    assert len(story["sources"]) == 2
+    assert journal_runtime.ingest([first, same, other]) == []
+
+
+@pytest.mark.parametrize("runtime", ["python", "swift"])
+def test_rss_cached_document_recovers_cap_and_lookback(runtime, request, tmp_path, monkeypatch):
+    from email.utils import format_datetime
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    recent, old = format_datetime(now), format_datetime(now - timedelta(hours=4))
+    body = f'<rss version="2.0"><channel><title>Fixture</title><item><title>Recent</title><link>https://example.com/recent</link><pubDate>{recent}</pubDate></item><item><title>Older</title><link>https://example.com/older</link><pubDate>{old}</pubDate></item></channel></rss>'.encode()
+    calls = []
+    class Feed(BaseHTTPRequestHandler):
+        def do_GET(self):
+            cached = self.headers.get("If-None-Match") == '"stable"'
+            calls.append(cached)
+            self.send_response(304 if cached else 200)
+            self.send_header("ETag", '"stable"'); self.end_headers()
+            if not cached: self.wfile.write(body)
+        def log_message(self, *args): pass
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Feed)
+    worker = threading.Thread(target=httpd.serve_forever, daemon=True); worker.start()
+    url = f"http://127.0.0.1:{httpd.server_port}/rss"
+    cache = FreshnessStore(tmp_path / "seen.sqlite")
+    # Upgrade case: the old version stored validators without a recoverable body.
+    cache.save_feed_cache(url, '"stable"', None)
+    import sqlite3
+    with sqlite3.connect(tmp_path / "swift-seen.sqlite") as db:
+        db.execute("CREATE TABLE feed_cache(url TEXT PRIMARY KEY,etag TEXT,last_modified TEXT,updated_at REAL)")
+        db.execute("INSERT INTO feed_cache VALUES (?,?,?,?)", (url, '"stable"', "", 0))
+    def collect(lookback, limit):
+        if runtime == "swift":
+            binary = request.getfixturevalue("swift_harness")
+            result = swift(binary, "rss", url, tmp_path / "swift-seen.sqlite", lookback, limit)
+            assert not result["errors"]
+            return result["articles"]
+        monkeypatch.setattr(engine, "RSS_FEEDS", {"science": [(url, "Fixture")]})
+        result = engine.fetch_rss("science", cache, lookback, limit)
+        assert not result.source_errors
+        for update in result.feed_cache_updates: cache.save_feed_cache(*update)
+        return [a.as_dict() for a in result.articles]
+    try:
+        assert len(collect(2, 1)) == 1
+        assert len(collect(12, 1)) == 1
+        assert len(collect(12, 2)) == 2
+        assert calls == [False, True, True]
+    finally: httpd.shutdown(); httpd.server_close(); worker.join()
+
+@pytest.mark.parametrize("runtime", ["python", "swift"])
+def test_canonical_identity_contract(runtime, request):
+    from agent_newsbot.store import canonical_url, article_id
+    fixture = ROOT / "tests/fixtures/canonical-urls.json"
+    rows = json.loads(fixture.read_text())
+    if runtime == "swift":
+        actual = swift(request.getfixturevalue("swift_harness"), "canonical-fixtures", fixture)["items"]
+    else:
+        actual = [{"canonical": canonical_url(r["raw"]), "id": article_id(r["raw"], "")} for r in rows]
+    for row, item in zip(rows, actual, strict=True):
+        assert item["canonical"] == row["canonical"], row["raw"]
+        assert item["id"] == article_id(row["canonical"], ""), row["raw"]
+    assert actual[1]["id"] != actual[2]["id"]
+    assert actual[6]["id"] != actual[7]["id"]
+
+
+def test_identity_upgrade_keeps_history_and_old_story_id(journal_runtime):
+    import sqlite3
+    from agent_newsbot.store import article_id
+    old_url = "https://example.com:443/migration"
+    legacy = article(old_url); legacy["id"] = "legacy-stable-id"
+    source = {k: legacy[k] for k in ("url", "title", "summary", "source", "published")}
+    source.update(providers=["direct"], metadata={})
+    legacy.update(sources=[source], revision=1, first_seen="2026-11-27T00:00:00Z")
+    # Seed an actual pre-v2 database record, including an immutable delivered event.
+    with sqlite3.connect(journal_runtime.path) as db:
+        db.executescript('''CREATE TABLE IF NOT EXISTS stories(id TEXT PRIMARY KEY,payload TEXT NOT NULL,updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS members(url TEXT PRIMARY KEY,story_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,story_id TEXT NOT NULL,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY);''')
+        db.execute("DELETE FROM migrations WHERE name='canonical-v2'")
+        db.execute("INSERT INTO stories VALUES (?,?,?)", (legacy["id"], json.dumps(legacy), datetime.now(timezone.utc).timestamp()))
+        db.execute("INSERT INTO members VALUES (?,?)", (old_url, legacy["id"]))
+        db.execute("INSERT INTO events(story_id,payload) VALUES (?,?)", (legacy["id"], json.dumps(legacy)))
+    if isinstance(journal_runtime, StoryStore): journal_runtime = StoryStore(journal_runtime.path)
+    updated = article("https://example.com/migration", title=legacy["title"] + ": corrected")
+    new = journal_runtime.ingest([updated])[0]
+    assert new["id"] == legacy["id"]
+    assert journal_runtime.story(article_id(updated["url"], ""))["id"] == legacy["id"]
+    history = journal_runtime.revisions(legacy["id"])
+    assert len(history) == 2
+    assert history[0]["story"]["url"] == old_url
+    assert history[1]["story"]["title"] == updated["title"]
+
+
+def test_late_provider_enrichment_is_a_distinct_event_type(journal_runtime):
+    direct = article(summary="A detailed direct report")
+    journal_runtime.ingest([direct])
+    digest = article(summary="Short", provider="worldmonitor")
+    digest["extra"]["metadata"] = {"locationName": "Florida"}
+    result = journal_runtime.ingest([digest])
+    assert result[0]["change"] == "enriched"
+    assert result[0]["summary"] == direct["summary"]
+    assert journal_runtime.ingest([direct, digest]) == []
+
+
+
+def test_native_atom_markup_alternate_link_and_invalid_document(swift_harness, tmp_path):
+    feed = tmp_path / "feed.xml"
+    feed.write_text('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Correct title</title><link rel="self" href="https://example.com/feed"/><link rel="alternate" type="text/html" href="https://example.com/story"/><summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>Hello <b>world</b></p><p>Second paragraph</p></div></summary><source><title>Not the article title</title></source></entry></feed>')
+    row = swift(swift_harness, "rss-parse", feed)["items"][0]
+    assert row == {"title": "Correct title", "url": "https://example.com/story", "summary": "Hello world Second paragraph"}
+    feed.write_text('<html><body>Maintenance page</body></html>')
+    assert swift(swift_harness, "rss-parse", feed)["error"] == "invalid feed"
+    feed.write_text('<rss><channel><item><title>Incomplete')
+    assert swift(swift_harness, "rss-parse", feed)["error"] == "invalid feed"
