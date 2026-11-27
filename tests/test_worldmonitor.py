@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -551,6 +551,14 @@ def journal_runtime(request, tmp_path):
         def pending(self, consumer): return swift(binary, "pending", db, consumer)
         def story(self, story_id): return swift(binary, "story", db, story_id)["story"]
         def revisions(self, story_id): return swift(binary, "revisions", db, story_id)["revisions"]
+        def op(self, value):
+            data = tmp_path / "operation.json"; data.write_text(json.dumps(value))
+            return swift(binary, "library-op", db, data)
+        def library(self, query=None): return self.op({"op": "search", "query": query or {}})
+        def editorial(self, sid): return self.op({"op": "editorial", "id": sid})
+        def save_editorial(self, sid, change): return self.op({"op": "save", "id": sid, "change": change})
+        def library_settings(self, kind=None, name=None, value=None, write=False): return self.op(dict(op="settings",kind=kind,name=name,value=value,write=write))
+        def research_export(self, sid): return self.op({"op": "export", "id": sid})
     return Native()
 
 
@@ -953,3 +961,141 @@ def test_native_port_probe_invalid_and_listening(swift_harness):
     with provider({}) as (base, _):
         assert swift(swift_harness, "port-probe", base)["ready"] is True
     assert swift(swift_harness, "port-probe", base)["ready"] is False
+
+
+def test_library_search_watchlist_mute_and_persistence(journal_runtime):
+    first = article(title="NASA lunar mission from Florida", provider="worldmonitor")
+    first["extra"]["metadata"] = {"locationName": "Florida", "tickers": ["SPACE"]}
+    second = article("https://second.example", title="Different topic about elections"); second["source"] = "Second"
+    third = article("https://third.example", title="Science research on oceans"); third["source"] = "Third"
+    rows = journal_runtime.ingest([first, second, third]); sid = next(r["id"] for r in rows if r["title"] == first["title"])
+    assert len(journal_runtime.library()["stories"]) == 3
+    assert journal_runtime.library({"q": "NASA"})["stories"][0]["id"] == sid
+    assert journal_runtime.library({"entity": "Florida", "provider": "worldmonitor", "desk": "science"})["stories"][0]["id"] == sid
+    assert len(journal_runtime.library({"source": "second.example"})["stories"]) == 1
+    page = journal_runtime.library({"limit": "1"}); assert page["next_offset"] == 1
+    assert journal_runtime.library({"limit": "1", "offset": "1"})["stories"][0]["id"] != page["stories"][0]["id"]
+    journal_runtime.library_settings("search", "Florida watch", {"entity": "Florida"}, write=True)
+    assert journal_runtime.library_settings()["preferences"][0]["value"] == {"entity": "Florida"}
+    journal_runtime.library_settings("mute", "Example", True, write=True)
+    assert len(journal_runtime.library()["stories"]) == 2
+    assert len(journal_runtime.library({"include_muted": "true"})["stories"]) == 3
+    assert len(journal_runtime.pending("not-filtered")["events"]) == 3
+    journal_runtime.library_settings("mute", "Example", None, write=True)
+    assert len(journal_runtime.library()["stories"]) == 3
+
+
+def test_revision_bound_editorial_approval_and_research_export(journal_runtime):
+    row = journal_runtime.ingest([article()])[0]; sid = row["id"]
+    state = journal_runtime.save_editorial(sid, {"expected_revision": 1, "expected_editorial_version": 0, "generate": True, "bookmarked": True})
+    assert state["editorial"]["status"] == "draft"
+    assert set(state["editorial"]["drafts"]) == {"youtube_title", "youtube_description", "x_post", "tiktok_caption", "narration"}
+    assert len(journal_runtime.library({"bookmarked": "true"})["stories"]) == 1
+    approved = journal_runtime.save_editorial(sid, {"expected_revision": 1, "expected_editorial_version": 1, "status": "approved"})
+    assert approved["editorial"]["approved_revision"] == 1
+    export = journal_runtime.research_export(sid)
+    assert export["approved"] is True and export["videobot"]["action"] == "inspect"
+    assert export["source_urls"] == [row["url"]] and export["publishing"] == "manual only"
+    changed = article(title="NASA cancels lunar orbiter mission after engine trouble")
+    journal_runtime.ingest([changed])
+    assert journal_runtime.editorial(sid)["editorial"]["status"] == "needs_review"
+    assert journal_runtime.research_export(sid)["approved"] is False
+    assert len(journal_runtime.library({"status": "needs_review"})["stories"]) == 1
+    assert len(journal_runtime.pending("editorial-is-not-news")["events"]) == 2
+
+
+@pytest.mark.parametrize("runtime", ["python", "swift"])
+def test_library_http_editorial_conflicts_and_validation(runtime, request, tmp_path, monkeypatch):
+    with contextlib.ExitStack() as stack:
+        if runtime == "swift":
+            binary = request.getfixturevalue("swift_harness")
+            db = tmp_path / "stories.sqlite"
+            data = tmp_path / "rows.json"; data.write_text(json.dumps([article()]))
+            row = swift(binary, "ingest", db, data)["articles"][0]
+            base, _ = stack.enter_context(native_bridge(binary, db))
+            token = "integration-test-token"
+        else:
+            monkeypatch.setattr(server, "HOME", tmp_path); monkeypatch.setattr(server, "SHARED", tmp_path / "shared")
+            state = server.NewsState(); monkeypatch.setattr(server, "STATE", state)
+            row = state.stories.ingest([article()])[0]
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+            def stop(): httpd.shutdown(); httpd.server_close(); thread.join()
+            stack.callback(stop); base = f"http://127.0.0.1:{httpd.server_port}"; token = state.token
+        headers = {"Authorization": "Bearer " + token}
+        route = base + "/v1/library/editorial?id=" + row["id"]
+        for bad_status in ([], {}, True, None):
+            invalid = requests.post(route, headers=headers, json={"expected_revision": 1, "expected_editorial_version": 0, "status": bad_status}, timeout=5)
+            assert invalid.status_code == 400
+        assert requests.get(route, headers=headers, timeout=5).json()["story"]["editorial"]["version"] == 0
+        assert requests.get(base + "/v1/library", timeout=5).status_code == 401
+        assert requests.get(base + "/v1/library?limit=0", headers=headers, timeout=5).status_code == 400
+        assert requests.get(base + "/v1/library?bookmarked=yes", headers=headers, timeout=5).status_code == 400
+        first = {"expected_revision": 1, "expected_editorial_version": 0, "generate": True}
+        response = requests.post(route, headers=headers, json=first, timeout=5)
+        assert response.status_code == 200, response.text
+        assert requests.post(route, headers=headers, json=first, timeout=5).status_code == 409
+        drafts = response.json()["story"]["editorial"]["drafts"]
+        drafts["x_post"] = "中" * 150
+        invalid = requests.post(route, headers=headers, json={"expected_revision": 1, "expected_editorial_version": 1, "drafts": drafts}, timeout=5)
+        assert invalid.status_code == 400
+        saved = requests.get(route, headers=headers, timeout=5).json()["story"]["editorial"]
+        assert saved["version"] == 1 and saved["drafts"]["x_post"] != drafts["x_post"]
+        assert requests.post(route, headers=headers, data=b"[]", timeout=5).status_code == 400
+        assert requests.post(route, headers=headers, data=b"{" + b" " * 66000, timeout=5).status_code == 400
+        assert requests.post(base + "/v1/library", headers=headers, json={}, timeout=5).status_code == 405
+        assert requests.get(base + "/v1/library/editorial?id=missing", headers=headers, timeout=5).status_code == 404
+        assert requests.post(base + "/v1/library/settings", headers=headers, json={"kind": "search", "name": "NASA", "value": {"q": "NASA"}}, timeout=5).status_code == 200
+        assert requests.get(base + "/v1/library/settings", headers=headers, timeout=5).json()["preferences"][0]["name"] == "NASA"
+        exported = requests.get(base + "/v1/library/export?id=" + row["id"], headers=headers, timeout=5).json()
+        assert exported["publishing"] == "manual only" and exported["approved"] is False
+
+
+def test_library_files_export_private_and_no_overwrite(journal_runtime, tmp_path):
+    from agent_newsbot.library import write_package
+    row = journal_runtime.ingest([article()])[0]; sid = row["id"]
+    journal_runtime.save_editorial(sid, {"expected_revision": 1, "expected_editorial_version": 0, "generate": True})
+    parent = tmp_path / "exports"
+    def export():
+        if hasattr(journal_runtime, "op"):
+            return Path(journal_runtime.op({"op": "export-files", "id": sid, "destination": str(parent)})["folder"])
+        return write_package(journal_runtime.research_export(sid), parent)
+    first, second = export(), export()
+    assert first != second and first.is_dir() and second.is_dir()
+    assert {p.name for p in first.iterdir()} == {"research.json", "sources.txt", "posts.md"}
+    assert json.loads((first / "research.json").read_text())["story"]["id"] == sid
+    assert (first / "sources.txt").read_text().strip() == row["url"]
+    assert "youtube_title" in (first / "posts.md").read_text()
+    assert first.stat().st_mode & 0o777 == 0o700
+    assert all(p.stat().st_mode & 0o777 == 0o600 for p in first.iterdir())
+    assert not list(parent.glob(".research-*"))
+
+
+def test_library_cli_from_other_directory_and_conflict(tmp_path):
+    home = tmp_path / 'news data'
+    env = dict(os.environ, AGENT_NEWSBOT_HOME=str(home), PYTHONPATH=str(ROOT / 'linux'))
+    def cli(*args):
+        return subprocess.run([sys.executable, '-m', 'agent_newsbot', *args], cwd=tmp_path,
+                              env=env, text=True, capture_output=True, timeout=20)
+    missing = cli('library')
+    assert missing.returncode == 1 and 'fetch first' in missing.stderr
+    assert not home.exists()
+    row = StoryStore(home / 'stories.sqlite').ingest([article()])[0]
+    result = cli('library', '--entity', 'NASA', '--limit', '1')
+    assert result.returncode == 0 and json.loads(result.stdout)['stories'][0]['id'] == row['id']
+    changes = tmp_path / 'changes.json'
+    changes.write_text(json.dumps({'expected_revision': 1, 'expected_editorial_version': 0, 'generate': True}))
+    saved = cli('editorial', row['id'], '--changes', str(changes))
+    assert saved.returncode == 0 and json.loads(saved.stdout)['editorial']['version'] == 1
+    stale = cli('editorial', row['id'], '--changes', str(changes))
+    assert stale.returncode == 1 and 'reload' in stale.stderr and 'Traceback' not in stale.stderr
+    exported = cli('export-research', row['id'], '--destination', str(tmp_path / 'exports'))
+    assert exported.returncode == 0
+    folder = Path(json.loads(exported.stdout)['folder'])
+    assert (folder / 'sources.txt').read_text().strip() == row['url']
+    changes.write_text('[]')
+    invalid = cli('preferences', '--changes', str(changes))
+    assert invalid.returncode == 1 and 'JSON object' in invalid.stderr
+    (home / 'stories.sqlite').write_bytes(b'invalid sqlite file')
+    broken = cli('library')
+    assert broken.returncode == 1 and 'Traceback' not in broken.stderr

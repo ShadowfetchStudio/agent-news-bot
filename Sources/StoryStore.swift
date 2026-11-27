@@ -8,7 +8,7 @@ final class StoryStore: @unchecked Sendable {
     init(path: URL) { self.path = path }
     enum Failure: Error { case database, invalidConsumer, invalidLimit, invalidAcknowledgement }
 
-    private func withDB<T>(_ work: (OpaquePointer) throws -> T) throws -> T {
+    func withDB<T>(_ work: (OpaquePointer) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
         var handle: OpaquePointer?
         guard sqlite3_open(path.path, &handle) == SQLITE_OK, let db = handle else {
@@ -25,7 +25,9 @@ final class StoryStore: @unchecked Sendable {
             "CREATE TABLE IF NOT EXISTS consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL DEFAULT 0, offered INTEGER NOT NULL DEFAULT 0)",
             "CREATE INDEX IF NOT EXISTS events_story_seq ON events(story_id,seq)",
             "CREATE TABLE IF NOT EXISTS identity_aliases(alias TEXT PRIMARY KEY, story_id TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY)"
+            "CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY)",
+            "CREATE TABLE IF NOT EXISTS editorial(story_id TEXT PRIMARY KEY,payload TEXT NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
         ] { try run(db, sql) }
         try run(db, "BEGIN IMMEDIATE")
         do {
@@ -43,7 +45,7 @@ final class StoryStore: @unchecked Sendable {
         } catch { _ = try? run(db, "ROLLBACK"); throw error }
     }
 
-    @discardableResult private func run(_ db: OpaquePointer, _ sql: String, _ values: [String] = []) throws -> [[String]] {
+    @discardableResult func run(_ db: OpaquePointer, _ sql: String, _ values: [String] = []) throws -> [[String]] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw Failure.database }
         defer { sqlite3_finalize(stmt) }
@@ -58,10 +60,10 @@ final class StoryStore: @unchecked Sendable {
             rows.append((0..<sqlite3_column_count(stmt)).map { sqlite3_column_text(stmt, $0).map { String(cString: $0) } ?? "" })
         }
     }
-    private func encode(_ value: Any) throws -> String {
+    func encode(_ value: Any) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
     }
-    private func decode(_ text: String) throws -> [String: Any] {
+    func decode(_ text: String) throws -> [String: Any] {
         guard let value = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Failure.database }
         return value
     }

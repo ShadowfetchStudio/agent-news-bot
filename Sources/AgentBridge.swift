@@ -123,7 +123,8 @@ final class AgentBridge: @unchecked Sendable {
             data.append(buffer, count: n)
             if data.count > 64_000 { return }
         }
-        let headerText = String(data: data, encoding: .utf8) ?? ""
+        let headerEnd = data.range(of: Data("\r\n\r\n".utf8))!.upperBound
+        let headerText = String(data: data[..<headerEnd], encoding: .utf8) ?? ""
         let lines = headerText.split(whereSeparator: \.isNewline).map(String.init)
         let requestLine = lines.first ?? ""
         let parts = requestLine.split(separator: " ")
@@ -155,6 +156,25 @@ final class AgentBridge: @unchecked Sendable {
                 : json(405, ["error": "method not allowed"])
         } else if !authorized {
             response = json(401, ["error": "bearer token required"])
+        } else if path == "/v1/library" || path.hasPrefix("/v1/library/") {
+            var body: [String: Any] = [:]
+            if method == "POST" {
+                guard headers["transfer-encoding"] == nil, let length = Int(headers["content-length"] ?? ""), (0...65536).contains(length) else {
+                    writeResponse(client, status: 400, body: Data("{\"error\":\"a JSON body with Content-Length up to 65536 is required\"}".utf8)); return
+                }
+                var bytes = Data(data[headerEnd...])
+                while bytes.count < length {
+                    guard ProcessInfo.processInfo.systemUptime < deadline else { writeResponse(client, status: 400, body: Data("{\"error\":\"incomplete request body\"}".utf8)); return }
+                    let count = read(client, &buffer, min(buffer.count, length - bytes.count))
+                    guard count > 0 else { writeResponse(client, status: 400, body: Data("{\"error\":\"incomplete request body\"}".utf8)); return }
+                    bytes.append(buffer, count: count)
+                }
+                guard let parsed = try? JSONSerialization.jsonObject(with: bytes.prefix(length)) as? [String: Any] else {
+                    writeResponse(client, status: 400, body: Data("{\"error\":\"JSON object required\"}".utf8)); return
+                }
+                body = parsed
+            }
+            response = libraryResponse(path, method: method, query: Dictionary(queryItems.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last }), body: body)
         } else if path.hasPrefix("/v1/stories/") {
             let parts = path.split(separator: "/").map(String.init)
             if method != "GET" { response = json(405, ["error": "method not allowed"]) }
@@ -273,6 +293,27 @@ final class AgentBridge: @unchecked Sendable {
             response = json(404, ["error": "not found"])
         }
         writeResponse(client, status: response.0, body: response.1)
+    }
+
+    private func libraryResponse(_ path: String, method: String, query: [String: String], body: [String: Any]) -> (Int, Data) {
+        guard let stories else { return json(503, ["error": "story storage unavailable"]) }
+        let allowed = ["/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export"]
+        guard allowed.contains(path) else { return json(404, ["error": "not found"]) }
+        guard method == "GET" || (method == "POST" && ["/v1/library/settings", "/v1/library/editorial"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
+        do {
+            switch path {
+            case "/v1/library": return json(200, try stories.library(query))
+            case "/v1/library/settings": return json(200, try stories.librarySettings(kind: body["kind"] as? String, name: body["name"] as? String, value: body["value"], write: method == "POST"))
+            case "/v1/library/export": return json(200, try stories.researchExport(query["id"] ?? ""))
+            default:
+                if method == "POST" { return json(200, ["story": try stories.saveEditorial(query["id"] ?? "", change: body)]) }
+                guard let story = try stories.editorial(query["id"] ?? "") else { throw LibraryFailure.missing }
+                return json(200, ["story": story])
+            }
+        } catch LibraryFailure.missing { return json(404, ["error": "story not found"]) }
+        catch LibraryFailure.invalid(let message) { return json(400, ["error": message]) }
+        catch LibraryFailure.conflict(let message) { return json(409, ["error": message]) }
+        catch { return json(503, ["error": "story storage unavailable"]) }
     }
 
     private func finishJob(total: Int?, error: String?) {

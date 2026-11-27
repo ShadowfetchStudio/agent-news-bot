@@ -110,6 +110,18 @@ import Security
             return
         }
         let store = StoryStore(path: URL(fileURLWithPath: args[2]))
+        if args[1] == "library-op" {
+            let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[3]))) as! [String: Any]
+            switch value["op"] as? String {
+            case "search": try output(try store.library(value["query"] as? [String: String] ?? [:]))
+            case "save": try output(try store.saveEditorial(value["id"] as! String, change: value["change"] as! [String: Any]))
+            case "settings": try output(try store.librarySettings(kind: value["kind"] as? String, name: value["name"] as? String, value: value["value"], write: value["write"] as? Bool ?? false))
+            case "export": try output(try store.researchExport(value["id"] as! String))
+            case "export-files": try output(["folder": ResearchPackage.write(store.researchExport(value["id"] as! String), in: URL(fileURLWithPath: value["destination"] as! String)).path])
+            default: try output(try store.editorial(value["id"] as! String) ?? [:])
+            }
+            return
+        }
         if args[1] == "ingest" || args[1] == "ingest-error" {
             let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[3]))) as! [[String: Any]]
             let articles = try rows.map { try Article.fromWire($0) }

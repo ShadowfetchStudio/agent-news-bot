@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id
 from .hashtags import tweet
+from .library import LibraryMixin, SCHEMA
 
 
 def encoded(value):
@@ -56,7 +57,7 @@ def reports_disagree(sources):
     return False
 
 
-class StoryStore:
+class StoryStore(LibraryMixin):
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +74,7 @@ class StoryStore:
                 CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY);
             ''')
 
+            for sql in SCHEMA: db.execute(sql)
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM migrations WHERE name='canonical-v2'").fetchone():
                 for url, story_id in db.execute("SELECT url,story_id FROM members ORDER BY url").fetchall():

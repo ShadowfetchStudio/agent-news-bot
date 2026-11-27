@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var engine: NewsEngine
     @State private var showCoverage = false
+    @State private var showLibrary = false
 
     var body: some View {
         NavigationSplitView {
@@ -17,6 +18,7 @@ struct ContentView: View {
         .background(Theme.bgDeep)
         .toolbar { toolbar }
         .sheet(isPresented: $showCoverage) { CoverageView().environmentObject(engine) }
+        .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories) }
     }
 
     private var sidebar: some View {
@@ -56,7 +58,7 @@ struct ContentView: View {
                     Circle().fill(engine.bridgeReady ? Theme.success : Theme.danger).frame(width: 8, height: 8)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Local bridge")
-                        Text(engine.bridge.endpoint)
+                        Text(engine.bridgeReady ? engine.bridge.endpoint : "Offline — check Settings")
                             .font(.caption)
                             .foregroundStyle(Theme.textLow)
                     }
@@ -235,6 +237,7 @@ struct ContentView: View {
                 .foregroundStyle(Theme.textHi)
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            Button { showLibrary = true } label: { Label("Library / drafts", systemImage: "books.vertical") }
             Button { showCoverage = true } label: { Label("Coverage", systemImage: "list.bullet.clipboard") }
             Button {
                 Task { await engine.fetchFresh() }

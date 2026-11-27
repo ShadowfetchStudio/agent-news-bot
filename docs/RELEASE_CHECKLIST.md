@@ -26,13 +26,13 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 - [ ] Supported private Linux config and service wiring.
 - [ ] macOS automatic refresh and restored batch.
 - [ ] Disagreement/correction timeline, multiple desks and durable story detail.
-- [ ] Saved searches/watchlists, entity filters, bookmarks and source muting.
-- [ ] Source-quality explanations without inferred factual verification.
+- [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
+- [x] Source-quality explanations without inferred factual verification.
 - [ ] YouTube/X/TikTok draft templates, editorial approval state, ranked briefs and VideoBot export.
 
 ## Automation and maintenance
 
-- [ ] Durable story lookup, revision differences, source/provider filters.
+- [x] Durable story lookup, revision differences, source/provider filters.
 - [ ] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases.
 - [ ] Reference idempotent retrying consumer and versioned capabilities/errors.
 - [ ] Feed coverage/last-success/backoff, verified replacement sources.
@@ -107,3 +107,13 @@ Snapshot batch validation: 93 tests passed on macOS; 60 passed with 33 native-Ma
 - Actual installed-agent compatibility and GUI handoff remain open. Controlled fixtures are not an actual agent acceptance.
 
 Latest native validation: 101 tests passed; the Apple Silicon app built without compiler warnings and passed strict ad-hoc signature verification. The prior Linux validation remains 60 passed/33 native-Mac skips; changes since then are native agent execution and native-only tests. No production app was installed or user data overwritten. No release assets have been published yet.
+
+## Research library and editorial batch
+
+- Added persistent search/filter/pagination, bookmarks, saved watchlists, exact-source mutes and transparent review-priority ordering to both runtimes. Muting only hides groups whose sources are all muted and never changes consumer events. Entity filtering is explicitly keyword matching, not NER.
+- Added five-field editable platform templates, source-bound approval and optimistic concurrency using both story revision and editorial version. Later corrections produce needs-review; invalid or stale edits roll back. Added authenticated bounded-body API routes and Linux CLI workflows.
+- Added atomic private per-export research folders with saved drafts, full provenance and source URLs. VideoBot handoff is its documented Inspect URLs workflow; no unsupported project importer, media-rights assumption or automatic queueing is claimed.
+- Native UI checked using isolated fixture data/preferences: retained-story search, bookmark save, template generation, revision approval, correction to needs-review, summary/source links, weighted X counts, unsaved Done/Reload confirmation, keep-editing preservation and saved watchlist visibility. Screenshots at 1000×650 (library) and 850×660 (editor) showed readable controls without overlap. This is a scoped walkthrough, not complete VoiceOver/keyboard acceptance or a real agent/provider validation.
+- The UI check identified two extra issues now addressed: editor lacked original story evidence; returning from an editor could leave old row status. Added Story tab and reload-on-dismiss. A failed bridge bind now shows Offline in the sidebar instead of a misleading default URL.
+- Full automated validation: **110 passed on macOS**, **65 passed / 45 native-Mac skips on Pop!_OS**. Includes actual HTTP auth/validation/conflict tests in both runtimes, private non-overwriting file exports, and CLI from outside checkout with corrupted-journal error handling. Native build passed without warnings. The final UI-only reload-on-dismiss/offline-label adjustment is followed by a separate build/signature check.
+- Still open within the larger editorial checkbox: ranked briefing output beyond story priority. Source timeline is implemented and tested at API level; its native expanded-history interaction remains part of final GUI acceptance. Wider setup, consumer controls, maintenance, real integrations and final release remain open.
