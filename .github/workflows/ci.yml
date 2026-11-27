@@ -11,10 +11,10 @@ jobs:
   linux-python:
     name: Linux Python Tests & Syntax
     runs-on: ubuntu-latest
-    env:
-      AGENT_NEWSBOT_HOME: ${{ runner.temp }}/agent-newsbot-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Isolate test state
+        run: echo "AGENT_NEWSBOT_HOME=$RUNNER_TEMP/agent-newsbot-tests" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -31,10 +31,10 @@ jobs:
   macos-apple-silicon:
     name: macOS Apple Silicon Build
     runs-on: macos-latest
-    env:
-      AGENT_NEWSBOT_HOME: ${{ runner.temp }}/agent-newsbot-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Isolate test state
+        run: echo "AGENT_NEWSBOT_HOME=$RUNNER_TEMP/agent-newsbot-tests" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
