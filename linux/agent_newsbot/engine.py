@@ -14,6 +14,7 @@ import requests
 
 from . import hashtags, worldmonitor
 from .stories import StoryStore
+from .url_safety import safe_article_url
 from . import coverage
 from .config import (
     ALL_DESKS,
@@ -103,7 +104,12 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
             if resp.status_code != 304:
                 cache_updates.append((url, resp.headers.get("ETag"), resp.headers.get("Last-Modified"), body, observed_at))
             for entry in parsed.entries:
-                link = canonical_url(getattr(entry, "link", "") or "")
+                raw_link = getattr(entry, "link", "") or ""
+                if not safe_article_url(raw_link):
+                    errors.append(f"{label}: skipped a non-web or invalid article link")
+                    checks.append(coverage.check(label, "partial", "Invalid article URL skipped"))
+                    continue
+                link = canonical_url(raw_link)
                 if not link or "news.google.com" in link:
                     continue
                 if link in seen_urls:
@@ -188,6 +194,9 @@ def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
                 skipped_old += 1
                 continue
             url = item.get("url") or f"https://news.ycombinator.com/item?id={hid}"
+            if not safe_article_url(url):
+                errors.append("Hacker News: skipped invalid article link")
+                continue
             if "news.google.com" in url:
                 continue
             link = canonical_url(url)

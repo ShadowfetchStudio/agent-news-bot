@@ -148,12 +148,11 @@ struct ContentView: View {
                         if !sources.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Sources (\(sources.count))").font(.headline)
-                                Text("Grouped by headline similarity. Multiple links do not establish independent confirmation.")
+                                Text("Grouped by shared URL or equivalent substantive headline wording. Older groups may use broader similarity. Multiple links do not establish independent confirmation.")
                                     .font(.caption).foregroundStyle(Theme.textLow)
                                 ForEach(sources.indices, id: \.self) { i in
                                     let source = sources[i]
-                                    if let raw = source["url"] as? String, let url = URL(string: raw),
-                                       ["https", "http"].contains(url.scheme ?? "") {
+                                    if let raw = source["url"] as? String, let url = ArticleURL.validated(raw) {
                                         Link(source["source"] as? String ?? raw, destination: url)
                                         Text(source["title"] as? String ?? "").font(.caption)
                                         let observations = source["observations"] as? [String: [String: Any]] ?? [:]

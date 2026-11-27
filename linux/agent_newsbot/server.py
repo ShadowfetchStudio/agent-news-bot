@@ -21,6 +21,7 @@ from .store import FreshnessStore
 from .stories import StoryStore
 from .library import LibraryConflict
 from .consumers import ConsumerConflict
+from .url_safety import safe_article_url
 
 log = logging.getLogger("agent_newsbot")
 
@@ -169,6 +170,7 @@ class NewsState:
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=LOOKBACK_HOURS)
         def live(item: dict, batch: dict) -> bool:
+            if not safe_article_url(item.get('url')): return False
             dt = self._story_time(item, batch.get("fetched_at"))
             return dt is not None and cutoff <= dt <= now + timedelta(minutes=5)
         enabled = {row["desk"] for row in snapshot.get("desks") or []} or set(ALL_DESKS)

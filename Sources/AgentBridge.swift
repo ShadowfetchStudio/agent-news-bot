@@ -29,6 +29,10 @@ final class AgentBridge: @unchecked Sendable {
 
     var endpoint: String { "http://127.0.0.1:\(port)" }
 
+    func replaceToken(_ token: String) {
+        lifecycle.withLock { authToken = token }
+    }
+
     @discardableResult
     func start(port: Int, token: String) -> Bool {
         guard (1...65535).contains(port), !token.isEmpty else { return false }

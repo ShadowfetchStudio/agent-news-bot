@@ -47,6 +47,8 @@ def tags(desk: str, title: str, extra: list[str] | None = None) -> list[str]:
 
 
 def tweet(title: str, url: str, tag_list: list[str]) -> tuple[str, int]:
+    from .url_safety import safe_article_url
+    if not safe_article_url(url): return "", 281
     from .xtext import compose
     try:
         return compose(title, url, tag_list)

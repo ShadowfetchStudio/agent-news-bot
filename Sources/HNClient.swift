@@ -33,6 +33,7 @@ enum HNClient {
                     continue
                 }
                 let url = item.url?.isEmpty == false ? item.url! : "https://news.ycombinator.com/item?id=\(id)"
+                guard ArticleURL.validated(url) != nil else { errors.append("Hacker News: skipped invalid article link"); continue }
                 if url.contains("news.google.com") { continue }
                 let fingerprint = FreshnessStore.articleID(url: CanonicalURL.fingerprint(url), fallback: "hn-\(id)")
                 let extra = ["hn": "https://news.ycombinator.com/item?id=\(id)", "score": "\(item.score ?? 0)"]

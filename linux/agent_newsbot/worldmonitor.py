@@ -9,15 +9,35 @@ import os
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-import requests
+import base64
+from pathlib import Path
+import subprocess
+import sys
 
 from .coverage import check
+from .url_safety import safe_article_url
 from .config import Article, DeskResult, DESK_TITLES
 from .hashtags import tags, tweet
 from .store import article_id, canonical_url, iso, strip_html
 
 VARIANTS = {"full", "tech", "finance", "happy", "commodity", "energy"}
 MAX_BYTES = 4 * 1024 * 1024
+HTTP_DEADLINE = 20.0
+
+
+def bounded_request(base, variant, key):
+    if len(key)>8192 or len(base)>4096: raise ValueError("configuration too long")
+    request=json.dumps({"url":base+"/api/news/v1/list-feed-digest","variant":variant,"key":key}).encode()
+    env=dict(os.environ); env.pop("AGENT_NEWSBOT_WORLDMONITOR_KEY",None)
+    worker=Path(__file__).with_name("worldmonitor_worker.py")
+    result=subprocess.run([sys.executable,"-I",str(worker)],input=request,capture_output=True,timeout=HTTP_DEADLINE,env=env)
+    if result.returncode!=0 or len(result.stdout)>MAX_BYTES*2: raise ValueError("request worker failed")
+    response=json.loads(result.stdout)
+    if "error" in response: raise ValueError("request failed")
+    if response.get("status")!=200: return response.get("status"),None
+    body=base64.b64decode(response["body"],validate=True)
+    if len(body)>MAX_BYTES: raise ValueError("oversized response")
+    return 200,json.loads(body)
 
 
 def validate_base_url(base: str) -> str:
@@ -45,7 +65,9 @@ def parse_digest(payload: dict, lookback: float, limit: int, now: datetime | Non
             try:
                 if not isinstance(row, dict):
                     raise ValueError()
-                url = canonical_url(str(row.get("link") or ""))
+                raw_link = str(row.get("link") or "")
+                if not safe_article_url(raw_link): raise ValueError("invalid article URL")
+                url = canonical_url(raw_link)
                 p = urlsplit(url)
                 if p.scheme not in ("http", "https") or not p.hostname:
                     raise ValueError()
@@ -98,20 +120,12 @@ def fetch(lookback: float, limit: int) -> list[DeskResult]:
         variant = os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full")
         if variant not in VARIANTS:
             raise ValueError("invalid variant")
-        headers = {"Accept": "application/json"}
         key = os.getenv("AGENT_NEWSBOT_WORLDMONITOR_KEY", "")
-        if key:
-            headers["X-WorldMonitor-Key"] = key
-        # Never forward the API key through redirects. No retries within a fetch cycle.
-        with requests.get(base + "/api/news/v1/list-feed-digest", params={"variant": variant, "lang": "en"}, headers=headers, timeout=(5, 15), allow_redirects=False, stream=True) as response:
-            if response.status_code != 200:
-                return [DeskResult("world", [], source_errors=[f"World Monitor HTTP {response.status_code}"], source_checks=[check("World Monitor digest", "unavailable", f"HTTP {response.status_code}", "worldmonitor")])]
-            body = bytearray()
-            for chunk in response.iter_content(65536):
-                body.extend(chunk)
-                if len(body) > MAX_BYTES:
-                    raise ValueError("oversized response")
-            return parse_digest(json.loads(body), lookback, limit)
-    except (requests.RequestException, ValueError, TypeError):
+        # A child owns the request so a trickling body or blocked resolver cannot exceed the total deadline.
+        status,payload=bounded_request(base,variant,key)
+        if status!=200:
+            return [DeskResult("world", [], source_errors=[f"World Monitor HTTP {status}"], source_checks=[check("World Monitor digest", "unavailable", f"HTTP {status}", "worldmonitor")])]
+        return parse_digest(payload, lookback, limit)
+    except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError):
         # Do not log request URLs, credential-bearing headers, or response bodies.
         return [DeskResult("world", [], source_errors=["World Monitor unavailable or invalid response/configuration"], source_checks=[check("World Monitor digest", "unavailable", "Request, configuration or parsing failed", "worldmonitor")])]

@@ -86,7 +86,8 @@ final class NewsEngine: ObservableObject {
         return items
     }
 
-    var bridgeToken: String { loadOrCreateToken() }
+    @Published private(set) var bridgeToken = ""
+    @Published private(set) var bridgeCredentialError = ""
 
     func start() {
         guard !started else { return }
@@ -102,10 +103,7 @@ final class NewsEngine: ObservableObject {
             guard let self else { throw BridgeFetchFailure.unavailable }
             return try await self.fetchForBridge()
         }
-        bridgeReady = bridge.start(port: settings.bridgePort, token: bridgeToken)
-        if !bridgeReady {
-            status = "Bridge failed to bind on 127.0.0.1:\(settings.bridgePort) (port in use)."
-        }
+        reloadBridgeCredential()
         Task { await refreshAgents() }
         configureAutomaticRefresh()
     }
@@ -147,6 +145,7 @@ final class NewsEngine: ObservableObject {
     enum BridgeFetchFailure: Error { case unavailable, busy, failed }
 
     func applyBridgeSettings() {
+        guard !bridgeToken.isEmpty else { bridgeReady = false; return }
         let requested = settings.bridgePort
         let applied = bridge.start(port: requested, token: bridgeToken)
         bridgeReady = bridge.isListening
@@ -271,9 +270,9 @@ final class NewsEngine: ObservableObject {
     }
 
     func openStory(_ article: Article) {
-        if let url = URL(string: article.url) {
+        if let url = ArticleURL.validated(article.url) {
             NSWorkspace.shared.open(url)
-        }
+        } else { status = "Cannot open a non-web or invalid article link." }
     }
 
     func sendToHermes(_ items: [Article]? = nil) async {
@@ -347,15 +346,27 @@ final class NewsEngine: ObservableObject {
         }
     }
 
-    private func loadOrCreateToken() -> String {
-        let url = AppPaths.tokenFile
-        if let existing = try? String(contentsOf: url).trimmingCharacters(in: .whitespacesAndNewlines), existing.count >= 16 {
-            return existing
+    func reloadBridgeCredential() {
+        do {
+            let token = try BridgeCredential.loadOrCreate(at: AppPaths.tokenFile)
+            bridgeToken = token; bridgeCredentialError = ""
+            applyBridgeSettings()
+        } catch {
+            bridge.stop(); bridgeReady = false; bridgeToken = ""
+            bridgeCredentialError = "Bridge disabled: \(error.localizedDescription) Repair \(AppPaths.tokenFile.path), then Reload credential."
+            status = bridgeCredentialError
         }
-        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        try? token.write(to: url, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        return token
+    }
+
+    func rotateBridgeCredential() {
+        do {
+            let token = try BridgeCredential.rotate(at: AppPaths.tokenFile, expected: bridgeToken)
+            bridge.replaceToken(token)
+            bridgeToken = token; bridgeCredentialError = ""
+            status = "Bridge credential rotated. Connected clients must reload the token file."
+        } catch {
+            bridgeCredentialError = "Credential rotation failed: \(error.localizedDescription)"
+        }
     }
 
     func installAgentSkills() {

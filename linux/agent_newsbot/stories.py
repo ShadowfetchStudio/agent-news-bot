@@ -9,11 +9,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id
+from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id, can_group_titles
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
 from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
 from .private_files import private_database
+from .url_safety import safe_article_url
 import time
 
 
@@ -99,6 +100,7 @@ class StoryStore(LibraryMixin, ConsumerMixin):
             db.close()
 
     def ingest(self, articles: list[dict]) -> list[dict]:
+        if any(not safe_article_url(a['url']) for a in articles): raise ValueError('invalid article URL')
         # Group first, then emit one complete revision per story per transaction.
         unique, desks_by_url = {}, {}
         for a in articles:
@@ -119,10 +121,9 @@ class StoryStore(LibraryMixin, ConsumerMixin):
                 row = db.execute("SELECT s.payload FROM members m JOIN stories s ON s.id=m.story_id WHERE m.url=?", (url,)).fetchone()
                 old = json.loads(row[0]) if row else None
                 if old is None and article["desk"] not in ("weather", "markets", "polymarket"):
-                    tokens = title_tokens(article["title"])
                     for candidate, in db.execute("SELECT payload FROM stories WHERE updated>=? ORDER BY updated DESC LIMIT 500", (now.timestamp() - 48*3600,)):
                         candidate = json.loads(candidate)
-                        if candidate["desk"] not in ("weather", "markets", "polymarket") and is_near_duplicate_title(tokens, title_tokens(candidate["title"])):
+                        if candidate["desk"] not in ("weather", "markets", "polymarket") and can_group_titles(article["title"], candidate["title"]):
                             old = candidate
                             break
                 story_id = old["id"] if old else article["id"]
@@ -154,6 +155,7 @@ class StoryStore(LibraryMixin, ConsumerMixin):
                 sources[url] = dict(chosen, url=url, summary=summary, providers=sorted(observations),
                                     selected_provider=winner, observations=observations, metadata=metadata)
                 story = dict(old or article)
+                story.setdefault('grouping_policy', 'legacy-title-overlap' if old else 'equivalent-wording-v1')
                 story.pop("extra", None)
                 story.update(id=story_id, story_id=story_id, url=canonical_url(story["url"]),
                              sources=[sources[k] for k in sorted(sources)], observation_version=version)

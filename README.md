@@ -209,15 +209,18 @@ On macOS the token is shown in **Settings → Bridge** and is written to
 
 ## Privacy & data model
 
+See [article-link safety, grouping and bridge credential recovery](docs/LINKS_GROUPING_AND_CREDENTIALS.md) for current validation and legacy-data behavior, and [dependency locks and audit scope](docs/DEPENDENCIES.md) for repeatable runtime installation.
+
 - **Local-first.** The service runs on your machine and binds to `127.0.0.1`. Nothing is exposed to
   the network by default.
 - **No telemetry.** The default sources need no credentials. Optional World Monitor may require a provider key; macOS stores it in Keychain, Linux reads it from the service environment.
 - **Persisted state:** the existing freshness ledger, feed cache and snapshots, plus `stories.sqlite`
   containing source headlines/snippets/links, provider metadata, immutable revisions and consumer cursors.
   This is a research record, not an archive of full publisher articles.
-- **The bearer token is generated on first run** (macOS: a UUID-derived 32-hex string written 0600;
-  Linux: `secrets.token_hex(16)` written 0640) and never leaves the machine. It is **not** in source
-  control. Optional integration tokens on macOS are stored in the **Keychain**, not in plists.
+- **The bearer token is generated on first run** from 32 random bytes (64 hexadecimal characters),
+  saved privately at 0600, and used for the loopback bridge. Existing valid credentials are retained.
+  It is **not** in source control. The Mac exposes explicit reload/rotation and fails visibly if its
+  token cannot be saved. Optional integration tokens on macOS use **Keychain**, not plists.
 - **Source rights remain separate.** Agent News Bot stores source metadata and excerpts and serves them to local consumers; it does not grant permission to republish upstream content. Each
   upstream source's own terms govern use of its feed.
 

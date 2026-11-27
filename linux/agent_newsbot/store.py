@@ -222,3 +222,22 @@ def is_near_duplicate_title(a: set[str], b: set[str], threshold: float = 0.72) -
         return False
     union = a | b
     return bool(union) and (len(a & b) / len(union)) >= threshold
+
+
+def can_group_titles(a: str, b: str) -> bool:
+    """Only equivalent substantive wording may auto-group different source URLs.
+
+    Loose overlap remains useful for suggesting related stories, not for merging
+    their identities. Keep short actor names and ordered numbers; negation may
+    coexist in a group only because it is explicitly marked as disagreement.
+    """
+    import unicodedata
+    grammar = {'a', 'an', 'the', 'not', 'never', 'no'}
+    def signature(title):
+        title = unicodedata.normalize('NFC', title).lower()
+        words = re.findall(r'[^\W_]+', title, re.UNICODE)
+        content = tuple(w for w in words if w not in grammar)
+        numbers = re.findall(r'\d+(?:[.,]\d+)*', title)
+        return content, numbers
+    left, left_numbers = signature(a); right, right_numbers = signature(b)
+    return len(left) >= 4 and left == right and left_numbers == right_numbers

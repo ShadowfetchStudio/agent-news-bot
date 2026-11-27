@@ -4,6 +4,30 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "safe-urls" {
+            let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String]
+            try output(["safe": rows.map { ArticleURL.validated($0) != nil }]); return
+        }
+        if args[1] == "credential" {
+            do {
+                let path = URL(fileURLWithPath: args[2])
+                let token = args.count > 3 ? try BridgeCredential.rotate(at: path, expected: args[3]) : try BridgeCredential.loadOrCreate(at: path)
+                try output(["token": token])
+            } catch { try output(["error": error.localizedDescription]) }
+            return
+        }
+        if args[1] == "credential-server" {
+            let path = URL(fileURLWithPath: args[2]), bridge = AgentBridge()
+            let old = try BridgeCredential.loadOrCreate(at: path)
+            guard bridge.start(port: Int(args[3])!, token: old) else { throw StoryStore.Failure.database }
+            print("ready"); fflush(stdout)
+            _ = readLine()
+            let updated = try BridgeCredential.rotate(at: path, expected: old)
+            bridge.replaceToken(updated)
+            print("rotated"); fflush(stdout)
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            return
+        }
         if args[1] == "port-probe" { try output(["ready": await OpenClawClient.portOpen(args[2])]); return }
         if args[1] == "hermes-api" || args[1] == "hermes-probe" {
             let settings = await MainActor.run { () -> SettingsStore in

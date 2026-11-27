@@ -38,6 +38,7 @@ enum Hashtagger {
     }
 
     static func tweet(title: String, url: String, tags: [String]) -> (String, Int) {
+        guard ArticleURL.validated(url) != nil else { return ("", 281) }
         // Fail closed: no copyable draft is safer than approving a post using an inaccurate fallback.
         do { return try XText.compose(title: title, url: url, tags: tags) }
         catch { return ("", 281) }

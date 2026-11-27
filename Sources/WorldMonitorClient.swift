@@ -60,6 +60,7 @@ enum WorldMonitorClient {
             var result = results[desk] ?? DeskResult(desk: desk, articles: [], skippedOld: 0, skippedDup: 0, sourceErrors: [])
             for raw in rows.prefix(1000) {
                 guard let row = raw as? [String: Any], let rawLink = row["link"] as? String,
+                      ArticleURL.validated(rawLink) != nil,
                       let c = URLComponents(string: rawLink), ["http", "https"].contains(c.scheme ?? ""), c.host != nil,
                       let rawTitle = row["title"] as? String, let millis = row["publishedAt"] as? NSNumber,
                       millis.doubleValue.isFinite else { skipped += 1; continue }

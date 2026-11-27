@@ -24,6 +24,11 @@ enum LibraryModel {
         result["editorial"] = state
         result["review_priority"] = min(count, 5) * 5 + (disagreement ? 15 : 0) + (story["change"] as? String == "updated" ? 10 : 0)
         result["quality_notes"] = ["\(count) source links; independence has not been verified.", "Provider credibility/importance scores are assessments, not fact checks.", "Media reuse rights are unknown until reviewed."] + (disagreement ? ["Conflicting or changed headlines need review."] : [])
+        do { try ArticleURL.requireSafeStory(story); result["actionable_links_safe"] = true }
+        catch {
+            result["actionable_links_safe"] = false
+            result["quality_notes"] = (result["quality_notes"] as? [String] ?? []) + ["Invalid historical source link retained for evidence. Opening, drafting, approval and export of unsafe links are blocked."]
+        }
         return result
     }
     static func query(_ query: [String: String]) throws -> (sql: String, values: [String], limit: Int, offset: Int) {
@@ -100,6 +105,7 @@ extension StoryStore {
                 state["notes"] = notes
             }
             if change["generate"] as? Bool == true || change["drafts"] != nil {
+                do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; drafting is disabled.") }
                 let value = change["generate"] as? Bool == true ? LibraryModel.templates(story) : change["drafts"]
                 guard let drafts = value as? [String: String], Set(drafts.keys) == Set(LibraryModel.fields.keys),
                       drafts.allSatisfy({ $0.value.unicodeScalars.count <= LibraryModel.fields[$0.key]! }) else { throw LibraryFailure.invalid("all five bounded draft fields are required") }
@@ -110,6 +116,7 @@ extension StoryStore {
             if let value = change["status"] {
                 guard let status = value as? String, LibraryModel.states.contains(status) else { throw LibraryFailure.invalid("invalid editorial status") }
                 if status == "approved" {
+                    do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; approval is disabled.") }
                     guard state["source_revision"] as? Int == revision else { throw LibraryFailure.conflict("drafts need review against the current revision") }
                     let drafts = state["drafts"] as? [String: String] ?? [:]
                     guard LibraryModel.fields.keys.allSatisfy({ !(drafts[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { throw LibraryFailure.invalid("complete the platform drafts before approval") }
@@ -148,6 +155,7 @@ extension StoryStore {
     }
     func researchExport(_ id: String) throws -> [String: Any] {
         guard let story = try editorial(id) else { throw LibraryFailure.missing }
+        do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; export is disabled.") }
         var seen = Set<String>()
         var urls = (story["sources"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }.filter { seen.insert($0).inserted }
         if urls.isEmpty { urls = [story["url"] as? String ?? ""] }

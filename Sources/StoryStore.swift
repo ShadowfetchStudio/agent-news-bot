@@ -112,6 +112,7 @@ final class StoryStore: @unchecked Sendable {
     }
 
     func ingest(_ articles: [Article]) throws -> [Article] {
+        guard articles.allSatisfy({ ArticleURL.validated($0.url) != nil }) else { throw URLError(.unsupportedURL) }
         var unique: [String: Article] = [:]
         var desksByURL: [String: Set<String>] = [:]
         for article in articles {
@@ -139,11 +140,10 @@ final class StoryStore: @unchecked Sendable {
                 var old = try row.map { try decode($0[0]) }
                 let special = ["weather", "markets", "polymarket"]
                 if old == nil && !special.contains(article.desk.rawValue) {
-                    let tokens = FreshnessStore.titleTokens(article.title)
                     for row in try run(db, "SELECT payload FROM stories WHERE updated>=? ORDER BY updated DESC LIMIT 500", [String(now.timeIntervalSince1970 - 48*3600)]) {
                         let candidate = try decode(row[0])
                         if special.contains(candidate["desk"] as? String ?? "") { continue }
-                        if FreshnessStore.isNearDuplicateTitle(tokens, FreshnessStore.titleTokens(candidate["title"] as? String ?? "")) { old = candidate; break }
+                        if FreshnessStore.canGroupTitles(article.title, candidate["title"] as? String ?? "") { old = candidate; break }
                     }
                 }
                 let id = old?["id"] as? String ?? article.id
@@ -199,6 +199,7 @@ final class StoryStore: @unchecked Sendable {
                 story.removeValue(forKey: "extra")
                 story["id"] = id; story["story_id"] = id
                 story["url"] = CanonicalURL.fingerprint(story["url"] as? String ?? url)
+                story["grouping_policy"] = story["grouping_policy"] ?? (old == nil ? "equivalent-wording-v1" : "legacy-title-overlap")
                 story["sources"] = sources.keys.sorted().compactMap { sources[$0] }
                 story["observation_version"] = version
                 story["desks"] = Set(story["desks"] as? [String] ?? [story["desk"] as? String ?? article.desk.rawValue]).union(desksByURL[url] ?? []).sorted()

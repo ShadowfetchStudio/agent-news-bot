@@ -195,6 +195,21 @@ final class FreshnessStore: @unchecked Sendable {
         return union > 0 && (Double(inter) / Double(union)) >= threshold
     }
 
+    static func canGroupTitles(_ a: String, _ b: String) -> Bool {
+        let grammar: Set<String> = ["a", "an", "the", "not", "never", "no"]
+        func signature(_ value: String) -> ([String], [String]) {
+            let text = value.precomposedStringWithCanonicalMapping.lowercased()
+            let words = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { !grammar.contains($0) }
+            let regex = try! NSRegularExpression(pattern: "\\d+(?:[.,]\\d+)*")
+            let numbers = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { match in
+                Range(match.range, in: text).map { String(text[$0]) }
+            }
+            return (words, numbers)
+        }
+        let left = signature(a), right = signature(b)
+        return left.0.count >= 4 && left.0 == right.0 && left.1 == right.1
+    }
+
     private func bind(_ stmt: OpaquePointer?, _ idx: Int32, _ value: String) {
         sqlite3_bind_text(stmt, idx, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
     }

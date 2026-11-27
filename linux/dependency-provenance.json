@@ -1,0 +1,61 @@
+{
+  "source": "PyPI release metadata",
+  "packages": [
+    {
+      "name": "certifi",
+      "version": "2026.11.20",
+      "metadata_url": "https://pypi.org/pypi/certifi/2026.11.20/json",
+      "requires_python": ">=3.7",
+      "artifact_count": 2
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.3",
+      "metadata_url": "https://pypi.org/pypi/charset-normalizer/3.5.3/json",
+      "requires_python": ">=3.7",
+      "artifact_count": 172
+    },
+    {
+      "name": "feedparser",
+      "version": "6.0.14",
+      "metadata_url": "https://pypi.org/pypi/feedparser/6.0.14/json",
+      "requires_python": ">=3.10",
+      "artifact_count": 2
+    },
+    {
+      "name": "feedparser-sgmllib",
+      "version": "2.1.0",
+      "metadata_url": "https://pypi.org/pypi/feedparser-sgmllib/2.1.0/json",
+      "requires_python": ">=3.10",
+      "artifact_count": 2
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "metadata_url": "https://pypi.org/pypi/idna/3.20/json",
+      "requires_python": ">=3.9",
+      "artifact_count": 2
+    },
+    {
+      "name": "quickjs",
+      "version": "1.19.4",
+      "metadata_url": "https://pypi.org/pypi/quickjs/1.19.4/json",
+      "requires_python": "",
+      "artifact_count": 21
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "metadata_url": "https://pypi.org/pypi/requests/2.34.2/json",
+      "requires_python": ">=3.10",
+      "artifact_count": 2
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "metadata_url": "https://pypi.org/pypi/urllib3/2.8.0/json",
+      "requires_python": ">=3.10",
+      "artifact_count": 2
+    }
+  ]
+}

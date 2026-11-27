@@ -1,5 +1,33 @@
 import Foundation
 
+enum ArticleURL {
+    static func validated(_ raw: String) -> URL? {
+        guard !raw.isEmpty, raw.utf8.count <= 8192,
+              !raw.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 || $0 == "\\" }),
+              let decoded = raw.removingPercentEncoding,
+              !decoded.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 || $0 == "\\" }),
+              let c = URLComponents(string: raw), ["http", "https"].contains(c.scheme?.lowercased() ?? ""),
+              c.user == nil, c.password == nil, let url = c.url, let host = url.host, !host.isEmpty,
+              c.port == nil || (1...65535).contains(c.port!),
+              host.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]").contains($0) }) else { return nil }
+        guard let schemeEnd = raw.range(of: "://") else { return nil }
+        let authority = raw[schemeEnd.upperBound...].prefix(while: { !"/?#".contains($0) })
+        guard !authority.contains("%") else { return nil }
+        if !host.contains(":") {
+            let labels = (host.hasSuffix(".") ? String(host.dropLast()) : host).split(separator: ".", omittingEmptySubsequences: false)
+            guard host.count <= 254, labels.allSatisfy({ !$0.isEmpty && $0.count <= 63 && !$0.hasPrefix("-") && !$0.hasSuffix("-") }) else { return nil }
+        }
+        return url
+    }
+    static func requireSafeStory(_ story: [String: Any]) throws {
+        let sources = story["sources"] as? [[String: Any]] ?? []
+        guard validated(story["url"] as? String ?? "") != nil,
+              sources.allSatisfy({ validated($0["url"] as? String ?? "") != nil }) else {
+            throw URLError(.unsupportedURL)
+        }
+    }
+}
+
 enum Desk: String, CaseIterable, Identifiable, Codable, Hashable {
     case breaking
     case politics
@@ -102,6 +130,7 @@ struct Article: Identifiable, Hashable, Codable {
     }
 
     static func fromWire(_ value: [String: Any]) throws -> Article {
+        guard ArticleURL.validated(value["url"] as? String ?? "") != nil else { throw URLError(.unsupportedURL) }
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
         var details: [String: String] = [:]
         for (key, item) in value["extra"] as? [String: Any] ?? [:] {

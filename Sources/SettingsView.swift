@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var worldMonitorKey = ""
     @State private var originalCredentials: [String: String] = [:]
     @State private var credentialMessage = ""
+    @State private var confirmRotation = false
 
     var body: some View {
         Form {
@@ -65,6 +66,9 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 }
                 Button("Install agent skills") { engine.installAgentSkills() }
+                Button("Reload credential") { engine.reloadBridgeCredential() }
+                Button("Rotate bridge credential…") { confirmRotation = true }.disabled(engine.bridgeToken.isEmpty)
+                if !engine.bridgeCredentialError.isEmpty { Text(engine.bridgeCredentialError).foregroundStyle(.red).textSelection(.enabled) }
                 Text("Loopback only. Install skills for Hermes and other agents explicitly. Existing skill files are preserved.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -88,6 +92,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog("Replace the bridge credential? Existing clients must reload the token file.", isPresented: $confirmRotation) {
+            Button("Rotate credential", role: .destructive) { engine.rotateBridgeCredential() }
+            Button("Cancel", role: .cancel) {}
+        }
         .onAppear {
             originalCredentials = [:]
             settings.credentialError = ""

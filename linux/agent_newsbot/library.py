@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from .hashtags import tweet
 from .xtext import measure
+from .url_safety import require_safe_story, safe_article_url
 
 SCHEMA = [
     "CREATE TABLE IF NOT EXISTS editorial(story_id TEXT PRIMARY KEY,payload TEXT NOT NULL)",
@@ -31,11 +32,13 @@ def decorate(story, editorial):
     if state["status"] == "approved" and state.get("approved_revision") != story.get("revision"):
         state["status"] = "needs_review"
     count = len(story.get("sources", []))
+    safe_links = all(safe_article_url(url) for url in [story.get('url')] + [s.get('url') for s in story.get('sources', [])])
     priority = min(count, 5) * 5 + (15 if story.get("disagreement") else 0) + (10 if story.get("change") == "updated" else 0)
-    return dict(story, editorial=state, review_priority=priority,
+    return dict(story, editorial=state, review_priority=priority, actionable_links_safe=safe_links,
         quality_notes=[f"{count} source links; independence has not been verified.",
                        "Provider credibility/importance scores are assessments, not fact checks.",
-                       "Media reuse rights are unknown until reviewed."] + (["Conflicting or changed headlines need review."] if story.get("disagreement") else []))
+                       "Media reuse rights are unknown until reviewed."] + (["Conflicting or changed headlines need review."] if story.get("disagreement") else []) +
+                       ([] if safe_links else ["Invalid historical source link retained for evidence. Opening, drafting, approval and export of unsafe links are blocked."]))
 
 
 def query_sql(query):
@@ -107,6 +110,7 @@ class LibraryMixin:
                 if not isinstance(change["notes"], str) or len(change["notes"]) > 12000: raise ValueError("notes too long")
                 state["notes"] = change["notes"]
             if change.get("generate") is True or "drafts" in change:
+                require_safe_story(story)
                 drafts = templates(story) if change.get("generate") is True else change["drafts"]
                 if not isinstance(drafts, dict) or set(drafts) != set(FIELDS): raise ValueError("all five draft fields are required")
                 if any(not isinstance(drafts[k], str) or len(drafts[k]) > length for k, length in FIELDS.items()): raise ValueError("draft field too long")
@@ -116,6 +120,7 @@ class LibraryMixin:
                 status = change["status"]
                 if not isinstance(status, str) or status not in STATES: raise ValueError("invalid editorial status")
                 if status == "approved":
+                    require_safe_story(story)
                     if state.get("source_revision") != story["revision"]: raise LibraryConflict("drafts need review against the current revision")
                     if not all(state.get("drafts", {}).get(k, "").strip() for k in FIELDS): raise ValueError("complete the platform drafts before approval")
                     state["approved_revision"] = story["revision"]
@@ -143,6 +148,7 @@ class LibraryMixin:
     def research_export(self, story_id):
         story = self.editorial(story_id)
         if story is None: raise LookupError("story not found")
+        require_safe_story(story)
         urls = list(dict.fromkeys(s["url"] for s in story.get("sources", []))) or [story["url"]]
         return {"schema_version": 1, "kind": "agent-news-bot-research", "story": story,
                 "approved": story["editorial"]["status"] == "approved", "source_urls": urls,
@@ -152,6 +158,8 @@ class LibraryMixin:
 
 
 def write_package(payload, parent):
+    require_safe_story(payload['story'])
+    if not all(safe_article_url(url) for url in payload['source_urls']): raise ValueError('invalid source URL')
     from pathlib import Path
     from uuid import uuid4
     import shutil

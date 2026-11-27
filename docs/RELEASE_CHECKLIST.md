@@ -6,10 +6,10 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 
 The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found nine additional defects after the original repair batches. These are separate from B01–B14; passing those regressions does not close the findings below.
 
-- [ ] R01: fail visibly and preserve data when native bridge credentials cannot be persisted; stable cached credential and explicit rotation.
+- [x] R01: fail visibly and preserve data when native bridge credentials cannot be persisted; stable cached credential and explicit rotation.
 - [ ] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
 - [ ] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
-- [ ] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
+- [x] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
 - [ ] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
 - [ ] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
 - [ ] R07: return a controlled unauthorized response for malformed/non-ASCII credentials.
@@ -42,6 +42,7 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Supported private Linux config and service wiring.
 - [ ] macOS automatic refresh and restored batch.
 - [ ] Disagreement/correction timeline, multiple desks and durable story detail.
+- [ ] Manual story-group split/merge with preserved identities, event history and explicit editorial review of legacy groups.
 - [x] Saved searches/watchlists, entity keyword filters, bookmarks and source muting.
 - [x] Source-quality explanations without inferred factual verification.
 - [ ] YouTube/X/TikTok draft templates, editorial approval state, ranked briefs and VideoBot export.
@@ -68,6 +69,15 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [ ] Final requirement-by-requirement review against this checklist and original audit.
 
 Do not mark items complete until their behavior and required verification are recorded. Existing audit evidence describes the pre-fix revision, not the eventual release.
+
+## Follow-up safety repair evidence
+
+- R01: the Mac caches one persisted bridge token and fails visibly on invalid/unreadable storage. An atomic private helper preserves existing bytes, bounds lock acquisition and supports explicit reload/rotation. Native tests cover 24 concurrent creators, stale rotation, invalid/directory/symlink destinations, private mode, and a real listener rejecting the former token and accepting the new saved token.
+- R04: common HTTP(S) article validation now covers RSS/HN/digest ingestion, journal inputs, active snapshot restoration, native opening/source links, agent handoff, drafting/approval and exports. Cross-runtime fixtures include credentials, control/encoded characters, non-web schemes, invalid ports/hosts, IPv6 and IDNA. Existing raw historical events remain untrusted forensic evidence; they are not rewritten. Library warnings identify unsafe retained source links and exports reject them.
+- R03 automatic matching is repaired: distinct actors/countries, numbers, dates, locations and prepositions no longer merge through loose word overlap; equivalent wording still groups, and same-URL corrections retain identity and immutable previous events. The checkbox remains open for manual repair of legacy groups with audit history.
+- The eight Python runtime dependencies now have version/hash locks, PyPI metadata provenance and a CI advisory audit. Build/test toolchains are explicitly outside that lock. The checked runtime and npm audit results reported no known findings.
+- Python World Monitor now has an isolated worker, 4 MiB stream cap and a 20-second parent deadline. Real oversized-valid-JSON and trickling-server tests verify rejection and timeout child reaping. Ordinary direct providers and persistent circuit breakers remain open.
+- Final batch validation: **154 passed on macOS; 93 passed / 61 native-Mac skips on Pop!_OS**. A final encoded-authority rejection refinement passed both Mac URL fixtures and the native Linux policy fixture. The Apple Silicon app rebuilt without warnings and passed strict ad-hoc signature verification. These checks use isolated state; no production service replacement or public release was performed.
 
 ## Repair batch 1 evidence
 

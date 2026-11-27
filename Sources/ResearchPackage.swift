@@ -2,6 +2,8 @@ import Foundation
 
 enum ResearchPackage {
     static func write(_ payload: [String: Any], in parent: URL) throws -> URL {
+        try ArticleURL.requireSafeStory(payload["story"] as? [String: Any] ?? [:])
+        guard let urls = payload["source_urls"] as? [String], urls.allSatisfy({ ArticleURL.validated($0) != nil }) else { throw URLError(.unsupportedURL) }
         let token = UUID().uuidString, staging = parent.appendingPathComponent(".research-" + token), destination = parent.appendingPathComponent("Research-" + token)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         do {

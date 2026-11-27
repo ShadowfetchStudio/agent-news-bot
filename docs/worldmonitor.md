@@ -29,6 +29,10 @@ for localhost, 127.0.0.1 or ::1. For another computer, use HTTPS or an SSH tunne
 No keys are embedded in query strings or sent through redirects. Provider errors are redacted.
 Responses are bounded to 4 MiB. Each refresh makes one request with no automatic retry; a 429
 is surfaced as a warning and normal sources continue. Keep an interval appropriate for your plan.
+Both runtimes enforce a 20-second total resource deadline for this connector. Python uses an
+isolated request worker that is killed and reaped on expiry; a read-inactivity timeout alone would
+not bound a server that trickles data. Direct-source limits and persistent circuit breakers remain
+separate work on the release checklist.
 
 The connector calls `GET /api/news/v1/list-feed-digest?variant=tech&lang=en`, optionally with an
 `X-WorldMonitor-Key` header. Hosted origin: `https://api.worldmonitor.app`; use only with the

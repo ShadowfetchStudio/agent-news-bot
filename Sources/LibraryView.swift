@@ -167,7 +167,7 @@ struct EditorialView: View {
                         Text(summary.isEmpty ? "No summary was supplied by this source." : summary).textSelection(.enabled)
                         Text("Read the original sources").font(.headline)
                         ForEach(sourceURLs, id: \.self) { raw in
-                            if let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
+                            if let url = ArticleURL.validated(raw) {
                                 Link(raw, destination: url).textSelection(.enabled)
                             } else { Text(raw).textSelection(.enabled) }
                         }

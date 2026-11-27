@@ -36,6 +36,11 @@ enum RSSClient {
                     cacheUpdates.append(FeedCacheUpdate(url: feed.url, etag: res.etag, lastModified: res.lastModified, body: body, observedAt: observedAt))
                 }
                 for item in items {
+                    guard ArticleURL.validated(item.link) != nil else {
+                        errors.append("\(feed.label): skipped a non-web or invalid article link")
+                        checks.append(SourceCheck(source: feed.label, state: "partial", detail: "Invalid article URL skipped"))
+                        continue
+                    }
                     let link = CanonicalURL.fingerprint(item.link)
                     guard !link.isEmpty, !link.contains("news.google.com") else { continue }
                     if seenURLs.contains(link) {

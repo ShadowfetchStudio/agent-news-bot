@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -223,16 +223,37 @@ def test_swift_connector_http_and_redirect(swift_harness):
 
 
 def test_oversized_body_and_timeout_are_isolated(monkeypatch):
-    monkeypatch.setenv("AGENT_NEWSBOT_WORLDMONITOR_ENABLED", "true")
-    with provider(b" " * 2048) as (url, _):
-        monkeypatch.setenv("AGENT_NEWSBOT_WORLDMONITOR_URL", url)
-        monkeypatch.setattr(worldmonitor, "MAX_BYTES", 1024)
-        assert worldmonitor.fetch(12, 20)[0].source_errors
-    def timeout(*a, **kw): raise requests.Timeout("do-not-leak-private-url")
-    monkeypatch.setattr(requests, "get", timeout)
-    result = worldmonitor.fetch(12, 20)
-    assert result[0].source_errors
-    assert "do-not-leak" not in str(result)
+    # Valid JSON would be returned without the stream cap; parser rejection alone
+    # must not make this pass. Exercise the actual isolated worker.
+    with provider({'categories': {}, 'padding': 'x' * (5 * 1024 * 1024)}) as (url, _):
+        with pytest.raises(ValueError): worldmonitor.bounded_request(url, 'full', 'fixture-secret')
+
+
+def test_worldmonitor_total_deadline_kills_and_reaps_trickling_worker(monkeypatch):
+    import time
+    class Trickle(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers()
+            try:
+                for _ in range(100):
+                    self.wfile.write(b' '); self.wfile.flush(); time.sleep(.1)
+            except (BrokenPipeError, ConnectionResetError): pass
+        def log_message(self, *args): pass
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), Trickle)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+    spawned = []; original = subprocess.Popen
+    def tracked(*args, **kwargs):
+        child = original(*args, **kwargs); spawned.append(child); return child
+    monkeypatch.setattr(worldmonitor.subprocess, 'Popen', tracked)
+    monkeypatch.setattr(worldmonitor, 'HTTP_DEADLINE', 1.0)
+    try:
+        start = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired):
+            worldmonitor.bounded_request(f'http://127.0.0.1:{httpd.server_port}', 'full', 'fixture-secret')
+        assert time.monotonic() - start < 3
+        assert len(spawned) == 1 and spawned[0].poll() is not None
+    finally:
+        httpd.shutdown(); httpd.server_close(); thread.join(timeout=2)
 
 
 @pytest.mark.parametrize("runtime", ["python", "swift"])
@@ -537,6 +558,122 @@ def test_keychain_errors_do_not_erase_or_hide_credentials(swift_harness):
         "write_failed": True, "read_failed": True, "deletes": 0, "adds": 0,
     }
 
+
+def test_native_private_credential_failures_concurrency_and_rotation(swift_harness, tmp_path):
+    import concurrent.futures, os
+    token_path = tmp_path / 'bridge.token'
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: swift(swift_harness, 'credential', token_path), range(24)))
+    tokens = {row['token'] for row in results}
+    assert len(tokens) == 1
+    old = tokens.pop()
+    assert len(old) == 64 and token_path.read_text().strip() == old
+    assert token_path.stat().st_mode & 0o777 == 0o600
+    assert 'error' in swift(swift_harness, 'credential', token_path, 'incorrect-existing-token')
+    assert token_path.read_text().strip() == old
+    new = swift(swift_harness, 'credential', token_path, old)['token']
+    assert new != old and swift(swift_harness, 'credential', token_path)['token'] == new
+    token_path.write_text('invalid')
+    assert 'error' in swift(swift_harness, 'credential', token_path)
+    assert token_path.read_text() == 'invalid'
+    token_path.unlink(); token_path.mkdir()
+    assert 'error' in swift(swift_harness, 'credential', token_path)
+    token_path.rmdir()
+    target = tmp_path / 'preserved'; target.write_text(old)
+    token_path.symlink_to(target)
+    assert 'error' in swift(swift_harness, 'credential', token_path)
+    assert target.read_text() == old
+
+
+def test_native_token_rotation_updates_running_listener(swift_harness, tmp_path):
+    import socket, select
+    token_path = tmp_path / 'bridge.token'
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
+    proc = subprocess.Popen([str(swift_harness), 'credential-server', str(token_path), str(port)],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        assert select.select([proc.stdout], [], [], 10)[0]
+        assert proc.stdout.readline().strip() == b'ready'
+        old = token_path.read_text().strip(); base = f'http://127.0.0.1:{port}/v1/status'
+        assert requests.get(base, headers={'Authorization': 'Bearer '+old}, timeout=2).status_code == 200
+        proc.stdin.write(b'\n'); proc.stdin.flush()
+        assert select.select([proc.stdout], [], [], 10)[0]
+        assert proc.stdout.readline().strip() == b'rotated'
+        new = token_path.read_text().strip()
+        assert old != new
+        assert requests.get(base, headers={'Authorization': 'Bearer '+old}, timeout=2).status_code == 401
+        assert requests.get(base, headers={'Authorization': 'Bearer '+new}, timeout=2).status_code == 200
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+@pytest.mark.parametrize('runtime', ['python', 'swift'])
+def test_actionable_url_policy_parity(runtime, request, tmp_path):
+    from agent_newsbot.url_safety import safe_article_url
+    valid = ['https://example.com/news?q=x%20y', 'http://127.0.0.1:8080/a', 'https://[::1]/a',
+             'https://bücher.example/über', 'HTTPS://EXAMPLE.COM/a', 'https://example.com/a%2Fb']
+    invalid = ['file:///tmp/a', 'mailto:a@example.com', 'javascript:alert(1)', 'ssh://host/a',
+               'https://user:password@example.com/a', 'https://@example.com/a', 'https://',
+               'https://example.com\\@elsewhere/a', 'https://example.com/%5cfoo',
+               'https://example.com/%0afoo', 'https://example.com/\nfoo',
+               'https://example.com/a b', 'https://example.com:99999/a',
+               'https://example..com/a', 'https://-example.com/a', 'https://example.com/%zz',
+               'https://%65xample.com/a', 'https://[fe80::1%25en0]/a']
+    rows = valid + invalid; expected = [True]*len(valid) + [False]*len(invalid)
+    if runtime == 'python': assert [safe_article_url(url) for url in rows] == expected
+    else:
+        path = tmp_path / 'urls.json'; path.write_text(json.dumps(rows))
+        assert swift(request.getfixturevalue('swift_harness'), 'safe-urls', path)['safe'] == expected
+
+
+@pytest.mark.parametrize('runtime', ['python', 'swift'])
+def test_unsafe_rss_url_rejected_with_visible_coverage(runtime, request, monkeypatch, tmp_path):
+    from agent_newsbot import engine
+    from agent_newsbot.store import FreshnessStore
+    rss = b'<rss version="2.0"><channel><title>Fixture</title><item><title>Unsafe story URL</title><link>file:///tmp/unused</link></item></channel></rss>'
+    with provider(rss) as (url, calls):
+        if runtime == 'python':
+            monkeypatch.setitem(engine.RSS_FEEDS, 'science', [(url, 'Fixture')])
+            result = engine.fetch_rss('science', FreshnessStore(tmp_path/'cache.sqlite'), 12, 20)
+            assert not result.articles and result.source_errors
+            assert any(check['state']=='partial' for check in result.source_checks)
+        else:
+            binary = request.getfixturevalue('swift_harness')
+            result = swift(binary, 'rss', url, tmp_path/'cache.sqlite', 12, 20)
+            assert not result['articles'] and result['errors']
+            assert result['coverage']['state'] == 'partial'
+
+
+def test_legacy_unsafe_sources_block_research_exports(journal_runtime, request):
+    import sqlite3
+    row = journal_runtime.ingest([article()])[0]
+    with sqlite3.connect(journal_runtime.path) as db:
+        raw = json.loads(db.execute('SELECT payload FROM stories WHERE id=?', (row['id'],)).fetchone()[0])
+        raw['sources'][0]['url'] = 'file:///tmp/unused'
+        db.execute('UPDATE stories SET payload=? WHERE id=?', (json.dumps(raw), row['id']))
+    if isinstance(journal_runtime, StoryStore):
+        with pytest.raises(ValueError): journal_runtime.research_export(row['id'])
+    else:
+        with native_bridge(request.getfixturevalue('swift_harness'), journal_runtime.path) as (base, proc):
+            response = requests.get(base+'/v1/library/export', params={'id': row['id']},
+                headers={'Authorization':'Bearer integration-test-token'}, timeout=2)
+            assert response.status_code == 400 and 'invalid source link' in response.json()['error']
+
+
+@pytest.mark.parametrize('runtime', ['python', 'swift'])
+def test_legacy_nonweb_snapshot_is_not_actionable(runtime, request, monkeypatch, tmp_path):
+    import agent_newsbot.server as server
+    safe = article(); bad = article(url='file:///tmp/unused')
+    data = {'fetched_at': NOW.isoformat(), 'articles': [safe, bad], 'desks': [{'desk':'science'}]}
+    if runtime == 'python':
+        monkeypatch.setattr(server, 'LOOKBACK_HOURS', 100000)
+        merged = server.STATE._keep_live_desks(data, {'fetched_at': NOW.isoformat(), 'articles': [], 'desks':[{'desk':'science'}]})
+    else:
+        path = tmp_path/'snapshot.json'; path.write_text(json.dumps(data))
+        merged = swift(request.getfixturevalue('swift_harness'), 'snapshot', path)
+    assert len(merged['articles']) == 1 and merged['articles'][0]['url'] == safe['url']
+
 @pytest.fixture(params=["python", "swift"])
 def journal_runtime(request, tmp_path):
     db = tmp_path / "journal.sqlite"
@@ -607,6 +744,35 @@ def test_desk_membership_and_disagreement_survive_grouping(journal_runtime):
     assert story["disagreement"] is True
     assert len(story["sources"]) == 2
     assert journal_runtime.ingest([first, same, other]) == []
+
+
+@pytest.mark.parametrize('titles', [
+    ('NASA launches new lunar orbiter to map south pole craters', 'China launches new lunar orbiter to map south pole craters'),
+    ('nasa launches new lunar orbiter to map south pole craters', 'china launches new lunar orbiter to map south pole craters'),
+    ('US approves new funding for national space research', 'UK approves new funding for national space research'),
+    ('Earthquake magnitude 6.2 shakes Tokyo during morning commute', 'Earthquake magnitude 6.3 shakes Tokyo during morning commute'),
+    ('NASA launches new lunar orbiter on January 8', 'NASA launches new lunar orbiter on January 9'),
+    ('Army moves troops from Paris to Berlin', 'Army moves troops to Paris from Berlin'),
+    ('NASA launches new lunar orbiter to map north pole craters', 'NASA launches new lunar orbiter to map south pole craters'),
+])
+def test_different_events_do_not_merge_by_word_overlap(journal_runtime, titles):
+    rows = journal_runtime.ingest([article(url=f'https://example.com/report-{i}', title=t) for i,t in enumerate(titles)])
+    assert len(rows) == 2 and all(len(row['sources']) == 1 for row in rows)
+    assert len(journal_runtime.pending('research')['events']) == 2
+    assert journal_runtime.ingest([article(url=f'https://example.com/report-{i}', title=t) for i,t in enumerate(titles)]) == []
+
+
+def test_equivalent_headlines_still_group_and_source_corrections_keep_identity(journal_runtime):
+    one = article(title='NASA launches a lunar orbiter to map the south pole craters')
+    two = article(url='https://other.example/report', title='NASA launches lunar orbiter to map south pole craters!')
+    first = journal_runtime.ingest([one, two])
+    assert len(first) == 1 and len(first[0]['sources']) == 2
+    before = journal_runtime.pending('before')
+    one['title'] = 'NASA cancels lunar launch after engine failure'
+    update = journal_runtime.ingest([one])[0]
+    assert update['id'] == first[0]['id'] and update['revision'] == first[0]['revision'] + 1
+    after = journal_runtime.pending('after')
+    assert after['events'][0] == before['events'][0]
 
 
 @pytest.mark.parametrize("runtime", ["python", "swift"])
