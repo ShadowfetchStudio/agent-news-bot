@@ -65,6 +65,12 @@ enum WorldMonitorClient {
 
     static func fetch(enabled: Bool, base: String, key: String, variant: String, lookback: Double, limit: Int) async -> [DeskResult] {
         guard enabled else { return [] }
+        return await SourceHealth.shared.run(key:"worldmonitor:" + base + ":" + variant,source:"World Monitor digest",desk:.world,provider:"worldmonitor") {
+            await collect(base:base,key:key,variant:variant,lookback:lookback,limit:limit)
+        }
+    }
+
+    private static func collect(base: String, key: String, variant: String, lookback: Double, limit: Int) async -> [DeskResult] {
         do { return try await retrieve(base: base, key: key, variant: variant, lookback: lookback, limit: limit) }
         catch {
             let failure = diagnosis(error)
@@ -91,7 +97,10 @@ enum WorldMonitorClient {
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw Failure.payload }
-        guard http.statusCode == 200 else { throw Failure.http(http.statusCode) }
+        guard http.statusCode == 200 else {
+            SourceAttempt.current?.record("http_\(http.statusCode)",retryAfter:http.value(forHTTPHeaderField:"Retry-After"))
+            throw Failure.http(http.statusCode)
+        }
         var data = Data()
         for try await byte in bytes {
             data.append(byte)

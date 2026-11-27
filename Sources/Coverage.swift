@@ -6,15 +6,18 @@ struct SourceCheck {
     var state = "success"
     var detail = ""
     var checkedAt = ISO8601DateFormatter().string(from: Date())
+    var health: [String: Any] = [:]
     var wire: [String: Any] {
-        ["source": source, "provider": provider, "state": state, "detail": detail, "checked_at": checkedAt]
+        var value: [String: Any] = ["source": source, "provider": provider, "state": state, "detail": detail, "checked_at": checkedAt]
+        if !health.isEmpty { value["health"] = health }
+        return value
     }
 }
 
 enum Coverage {
     // Success means a response was fetched and parsed, not that every claim is verified.
     static func summary(_ checks: [SourceCheck]) -> [String: Any] {
-        let unique = Dictionary(checks.map { ($0.provider + ":" + $0.source, $0) }, uniquingKeysWith: { _, newer in newer })
+        let unique = Dictionary(checks.map { (($0.health["id"] as? String).map { "health:" + $0 } ?? ($0.provider + ":" + $0.source), $0) }, uniquingKeysWith: { _, newer in newer })
         let rows = unique.values.sorted { ($0.provider, $0.source) < ($1.provider, $1.source) }
         let success = rows.filter { $0.state == "success" }.count
         let state: String

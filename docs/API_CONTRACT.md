@@ -61,3 +61,5 @@ Some transport failures have no response: disconnected clients, expired socket d
 The [reference consumer](../examples/reliable_consumer.py) negotiates capabilities, disables environment proxy inheritance for its loopback bearer credential, never follows redirects, and retries only reads and generation-bound acknowledgements with bounded backoff. It stops after ambiguous administrative failures. Before writing its private inbox, it validates page counters, strict event ordering and the acknowledgement boundary; malformed pages cannot advance a cursor.
 
 Live Swift/Python bridge tests run the example twice: the first run commits and acknowledges a fixture story, while the second commits zero new records and leaves a single inbox entry. Separate crash-before-ack tests prove replay idempotency. These checks do not execute external publishing or replace the need for an idempotent downstream sink.
+
+Source resilience adds `source_health: 1` and authenticated `GET /v1/sources` (no query parameters). The bounded response is `{ "sources": [...] }`; see [SOURCE_HEALTH.md](SOURCE_HEALTH.md) for field meanings, retry policy and interpretation limits.

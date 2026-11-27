@@ -26,6 +26,8 @@ On first macOS launch, choose direct sources or add a self-hosted/authorized Wor
 select desks and choose automatic refresh. Existing preferences are preserved on upgrade. Settings
 includes an explicit connection test using the entered values; Linux provides
 `agent-newsbot test-worldmonitor`. Tests do not ingest stories. See [setup and diagnostics](docs/worldmonitor.md).
+Persistent source history and backoff are available in Coverage, `GET /v1/sources`, and
+`agent-newsbot source-health`. See [source resilience and maintained feeds](docs/SOURCE_HEALTH.md).
 
 ## Table of contents
 

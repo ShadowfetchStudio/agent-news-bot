@@ -3,6 +3,7 @@ import Foundation
 enum HTTPTransport {
     struct Failure: LocalizedError {
         let status: Int
+        var retryAfter: String? = nil
         var errorDescription: String? {
             switch status {
             case 401: return "Authentication required or rejected (401). Check the saved API token."
@@ -17,6 +18,19 @@ enum HTTPTransport {
 
     static func receive(_ request: URLRequest, timeout: TimeInterval = 14,
                         maxBytes: Int = 4 * 1024 * 1024, redirects: Bool = true) async throws -> (Data, HTTPURLResponse) {
+        try SourceAttempt.current?.check()
+        do { return try await transfer(request, timeout: timeout, maxBytes: maxBytes, redirects: redirects) }
+        catch {
+            if !Task.isCancelled {
+                if let failure = error as? Failure { SourceAttempt.current?.record("http_\(failure.status)", retryAfter: failure.retryAfter) }
+                else { SourceAttempt.current?.record("transport") }
+            }
+            throw error
+        }
+    }
+
+    private static func transfer(_ request: URLRequest, timeout: TimeInterval,
+                                 maxBytes: Int, redirects: Bool) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
               url.host != nil, url.user == nil, url.password == nil else { throw URLError(.badURL) }
         let configuration = URLSessionConfiguration.ephemeral
@@ -26,7 +40,7 @@ enum HTTPTransport {
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        guard (200..<300).contains(http.statusCode) || http.statusCode == 304 else { throw Failure(status: http.statusCode) }
+        guard (200..<300).contains(http.statusCode) || http.statusCode == 304 else { throw Failure(status: http.statusCode, retryAfter: http.value(forHTTPHeaderField: "Retry-After")) }
         if http.statusCode == 304 { return (Data(), http) }
         // URLSession yields decoded bytes; compressed transfers cannot bypass the cap.
         var data = Data()

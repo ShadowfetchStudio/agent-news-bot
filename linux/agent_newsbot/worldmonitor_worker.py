@@ -17,7 +17,7 @@ def main():
     session.trust_env = False  # Do not forward credentials through inherited environment proxies.
     with session, session.get(request['url'],params={'variant':request['variant'],'lang':'en'},headers=headers,
                       timeout=(5,15),allow_redirects=False,stream=True) as response:
-        if response.status_code!=200: return {'status':response.status_code}
+        if response.status_code!=200: return {'status':response.status_code,'retry_after':response.headers.get('Retry-After','')[:128]}
         body=bytearray()
         for chunk in response.iter_content(65536):
             body.extend(chunk)

@@ -345,6 +345,12 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
         methods = allowed_methods(path)
         if methods and "GET" not in methods:
             self._send(405, {"error": "method not allowed"}); return
+        if path == "/v1/sources":
+            if parsed.query: self._send(400,{"error":"sources does not accept query parameters"})
+            else:
+                try: self._send(200,{"sources":STATE.store.health.list()})
+                except (OSError,sqlite3.Error,ValueError): self._send(503,{"error":"source health storage unavailable"})
+            return
         if path == "/v1/capabilities":
             if parsed.query: self._send(400, {"error": "capabilities does not accept query parameters"})
             else: self._send(200, capabilities())

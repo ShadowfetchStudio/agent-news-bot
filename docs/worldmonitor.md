@@ -45,8 +45,7 @@ Responses are bounded to 4 MiB. Each refresh makes one request with no automatic
 is surfaced as a warning and normal sources continue. Keep an interval appropriate for your plan.
 Both runtimes enforce a 20-second total resource deadline for this connector. Python uses an
 isolated request worker that is killed and reaped on expiry; a read-inactivity timeout alone would
-not bound a server that trickles data. Direct sources also have streaming/total-time bounds. Persistent circuit breakers remain
-separate work on the release checklist.
+not bound a server that trickles data. Direct sources also have streaming/total-time bounds. Persistent circuit breakers and last-success history are described in [Source health](SOURCE_HEALTH.md).
 
 ### Connection diagnostics
 
@@ -61,8 +60,7 @@ oversized responses, incompatible JSON/schema, authentication (401), authorizati
 endpoint (404), rate limits (429), redirects and provider errors. They never echo server error
 bodies or credentials. Fix the server certificate instead of disabling TLS verification. A redirect
 is refused; configure the final authorized origin explicitly. Python does not inherit environment
-proxies for requests containing the World Monitor key. Connection results are not persistent source
-health history; last-success tracking and automatic backoff remain separate work.
+proxies for requests containing the World Monitor key. Connection-test results are separate from the persistent [source health and automatic backoff](SOURCE_HEALTH.md) applied to ordinary fetches.
 
 The connector calls `GET /api/news/v1/list-feed-digest?variant=tech&lang=en`, optionally with an
 `X-WorldMonitor-Key` header. Hosted origin: `https://api.worldmonitor.app`; use only with the

@@ -1,0 +1,42 @@
+[
+  {
+    "url": "https://feeds.apnews.com/rss/apf-topnews",
+    "checked_at": "2026-11-27T15:16:56.129382+00:00",
+    "error": "Provider request failed: connection"
+  },
+  {
+    "url": "https://feeds.apnews.com/rss/apf-intlnews",
+    "checked_at": "2026-11-27T15:16:56.129574+00:00",
+    "error": "Provider request failed: connection"
+  },
+  {
+    "url": "https://finance.yahoo.com/news/rssindex",
+    "checked_at": "2026-11-27T15:16:56.129627+00:00",
+    "error": "Provider HTTP 404"
+  },
+  {
+    "url": "https://www.medicalnewstoday.com/rss",
+    "checked_at": "2026-11-27T15:16:56.226570+00:00",
+    "error": "Provider HTTP 404"
+  },
+  {
+    "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+    "checked_at": "2026-11-27T15:16:56.227840+00:00",
+    "http": 200,
+    "format": "rss20",
+    "entries": 20,
+    "title": "FRB: Press Release - All Releases",
+    "bytes": 14567,
+    "sha256": "b0b75fbd438ed27fdec21887552a2f62840b97c2b5cea90553c9be9590a3bf3d"
+  },
+  {
+    "url": "https://www.cancer.gov/publishedcontent/rss/syndication/rss/ncinewsreleases.rss",
+    "checked_at": "2026-11-27T15:16:56.453302+00:00",
+    "http": 200,
+    "format": "rss20",
+    "entries": 10,
+    "title": "NCI News Releases",
+    "bytes": 10027,
+    "sha256": "7d5388ce513704b1ca07b5cc0aaa1749e810270374f53a407c791beb0b5f74f0"
+  }
+]

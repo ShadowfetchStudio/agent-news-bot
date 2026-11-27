@@ -91,6 +91,8 @@ def iso(dt: datetime | None) -> str | None:
 class FreshnessStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or (HOME / "seen.sqlite")
+        from .source_health import SourceHealth
+        self.health = SourceHealth(self.path.parent / "source-health.sqlite")
         private_database(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

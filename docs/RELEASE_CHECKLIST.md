@@ -52,11 +52,11 @@ Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS su
 - [x] Durable story lookup, revision differences, source/provider filters.
 - [x] Consumer status/lag/ack, onboarding from history/date/now, replay/reset and optional worker leases (API and Linux CLI).
 - [x] Reference idempotent retrying consumer and versioned capabilities/errors.
-- [ ] Feed coverage/last-success/backoff, verified replacement sources.
+- [x] Feed coverage/last-success/backoff, verified replacement sources.
 - [ ] Backup, restore, consumer-safe pruning and bounded storage/load validation.
 - [x] Staged Linux upgrades, config preservation, health check and rollback (native user-service verification; root execution limit below).
 - [ ] Private file permissions, dependency constraints and vulnerability scan.
-- [ ] Total provider deadline and circuit breaker.
+- [x] Total provider deadline and circuit breaker.
 - [ ] Hosted data permissions documented separately from code licensing.
 
 ## Release evidence
@@ -231,3 +231,19 @@ First-run setup, source resilience, maintenance/retention/load, deeper editorial
 Persistent source health/backoff, backup/restore/retention/load, richer editorial briefs/platform approvals, full accessibility/real integrations and final release packages remain open.
 
 Final setup-batch verification: the rebuilt Apple Silicon app passed strict signature verification without compiler warnings. The final provider form was visually inspected with the empty row removed; 401 guidance and result clearing after editing still worked. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-setup-ui-3zii2o8r/verification.json`. The isolated app/preferences were cleaned up. Final focused Mac connection/migration/transport checks: **25 passed**; native Linux CLI/diagnostics/deadline checks after the worker refinement: **3 passed**. These checks do not claim real hosted-provider access or full VoiceOver acceptance.
+
+
+## Persistent source health and resilient collection
+
+- Added matching private SQLite source-health stores on Mac/Linux with source/configuration hashes, last attempt/full success/usable response, failure streak and earliest retry. State survives restart. Transactional five-minute probe leases and fencing prevent a stale worker from overwriting a newer probe; expired probes are recorded as interrupted. Identity count is capped at 1,024 and errors are bounded internal codes.
+- Ordinary RSS, Hacker News, Polymarket, Yahoo markets, Open-Meteo and World Monitor collection participate. RSS keys include the desk so a shared feed still populates both desks. Coverage distinguishes different health IDs instead of conflating identical display names. New source-health storage failures prevent requests; a post-retrieval health write failure retains stories and adds a visible warning.
+- Consecutive request/stale/unavailable failures use 60-second exponential backoff up to six hours. HTTP Retry-After seconds/dates can extend it (24-hour bound). Three transport failures or future Retry-After stop additional HTTP operations inside a provider check. Healthy partial responses continue ordinary polling and preserve partial coverage rather than claiming full success. Explicit World Monitor setup tests remain one-request diagnostics outside scheduled health.
+- Authenticated GET /v1/sources and Linux source-health CLI expose bounded history, and capability discovery advertises the feature. The Mac Coverage panel shows reloadable historical status, retained success times, failure codes and retry times. API validation covers authentication, methods, unexpected parameters, malformed storage and matching offline CLI output.
+- Real network regression cases verify repeated rate-limited fetches make only one request across restarted runtimes, multi-request providers stop after the configured failure threshold, and distinct desk memberships remain populated. Deterministic cross-runtime cases cover exponential delays, partial responses, date/seconds parsing, fencing, cancellation, 16 concurrent claimers, corrupt/symlink/directory/invalid-schema storage, capacity and database interoperability.
+- Bounded live recheck reconfirmed two 404 feeds and two unreachable AP endpoints. Replaced Yahoo Finance RSS and Medical News Today RSS with publisher-documented Federal Reserve and National Cancer Institute release feeds (HTTP 200, 20/10 parsed entries), clearly labeled as institutional releases. Removed the repeatedly unreachable AP defaults without deleting old research or claiming permanent retirement. Observation times, byte counts and successful response hashes are in audits/2026-11-27/feed-replacements.json; rationale and primary publisher links are in SOURCE_HEALTH.md.
+- Full suites before the final partial-coverage policy refinement: **293 passed on macOS; 155 passed / 138 Mac-only skips on native Pop!_OS**. The final policy/source-health suite passed **44 Mac tests; 23 Linux tests / 21 Mac-only skips**. Apple Silicon build completed without warnings and passed strict ad-hoc signature verification.
+- Actual isolated Mac walkthrough displayed an open circuit with failure streak 3, last successful check retained and a future retry; a healthy source; and a partial source showing Never for full success and a usable-response time. Authenticated built-app /v1/sources agreed. Reload showed a newly added fourth source without fetching. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-health-ui-1v0xp1s7/verification.json`. The app was stopped and isolated preferences removed. The initial accessibility aggregate lagged after insertion despite correct visual rows; stable row IDs and explicit accessibility grouping were added for the final recheck.
+
+Source-history retention is still part of the broader maintenance work. This closes the source health/backoff/replacement and provider-bound/circuit checkboxes, not the full release, recovery/load, editorial, accessibility, real-provider or final artifact gates.
+
+Final source-health UI verification: stable identity and accessibility groups correctly exposed the newly inserted fourth row after Reload, without stale aggregate text. The final Apple Silicon build passed without warnings and strict signature verification passed. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-health-ui-gwi1mk51/verification.json`. Test app stopped and isolated preferences removed. This is scoped accessibility-tree verification, not a complete VoiceOver walkthrough.

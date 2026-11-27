@@ -13,6 +13,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("serve", help="Run the localhost API and periodic fetch loop")
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
     sub.add_parser("test-worldmonitor", help="Test configured World Monitor access without saving stories (reads one digest)")
+    sub.add_parser("source-health", help="Read persistent source health and next-retry times without fetching")
     sub.add_parser("status", help="Show last snapshot counts")
     library = sub.add_parser("library", help="Search retained research stories")
     for name in ("q", "entity", "desk", "source", "provider", "status", "sort", "limit", "offset"):
@@ -43,6 +44,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from .config import SHARED
+    if args.cmd == "source-health":
+        from .config import HOME
+        from .source_health import SourceHealth
+        import sqlite3
+        try:
+            json.dump({"sources":SourceHealth(HOME/"source-health.sqlite").list()},sys.stdout,indent=2); sys.stdout.write("\n")
+            return 0
+        except (OSError,sqlite3.Error,ValueError):
+            print("Source health storage unavailable",file=sys.stderr); return 1
     if args.cmd == "test-worldmonitor":
         from .worldmonitor import test_connection
         result = test_connection(os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000"),

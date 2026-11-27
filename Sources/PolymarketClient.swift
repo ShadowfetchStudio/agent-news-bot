@@ -2,6 +2,13 @@ import Foundation
 
 enum PolymarketClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
+        let results = await store.health.run(key: "direct:polymarket", source: "Polymarket", desk: .polymarket) {
+            [await collect(lookbackHours: lookbackHours, maxItems: maxItems, store: store)]
+        }
+        return results[0]
+    }
+
+    private static func collect(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
         var checks: [SourceCheck] = []
         let skippedDup = 0

@@ -55,7 +55,7 @@ enum SnapshotPolicy {
                 return SourceCheck(source: source["source"] as? String ?? desk.title, provider: source["provider"] as? String ?? "direct",
                     state: ["success", "partial"].contains(state) ? "stale" : state,
                     detail: "Restored snapshot; not checked in this session. " + (source["detail"] as? String ?? ""),
-                    checkedAt: source["checked_at"] as? String ?? fetchedAt ?? "")
+                    checkedAt: source["checked_at"] as? String ?? fetchedAt ?? "", health: source["health"] as? [String: Any] ?? [:])
             }
             desks.append(DeskResult(desk: desk, articles: articles.filter { $0.displayDesks.contains(desk) }, skippedOld: 0, skippedDup: 0,
                 sourceErrors: raw["errors"] as? [String] ?? [], sourceChecks: checks))

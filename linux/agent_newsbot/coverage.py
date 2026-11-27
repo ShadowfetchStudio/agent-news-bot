@@ -8,7 +8,7 @@ def check(source: str, state: str = "success", detail: str = "", provider: str =
 
 
 def summary(checks: list[dict]) -> dict:
-    unique = {(c["provider"], c["source"]): c for c in checks}
+    unique = {(c.get("health", {}).get("id") or c["provider"]+":"+c["source"]): c for c in checks}
     rows = [unique[key] for key in sorted(unique)]
     successful = sum(row["state"] == "success" for row in rows)
     if not rows:

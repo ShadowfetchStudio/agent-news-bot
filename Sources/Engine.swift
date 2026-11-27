@@ -107,6 +107,7 @@ final class NewsEngine: ObservableObject {
         settings.save()
         let snap = snapshot
         bridge.stories = stories
+        bridge.sourceHealth = store.health
         bridge.groupRepairHandler = { [weak self] in
             DispatchQueue.main.sync { self?.refreshRepairedSnapshot() }
         }

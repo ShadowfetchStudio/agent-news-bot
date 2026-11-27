@@ -94,7 +94,11 @@ def bounded_request(base, variant, key):
     if result.returncode!=0 or len(result.stdout)>MAX_BYTES*2: raise ValueError("request worker failed")
     response=json.loads(result.stdout)
     if "error" in response: raise DiagnosticError(response["error"] if response["error"] in ("tls", "timeout", "response_too_large") else "network")
-    if response.get("status")!=200: return response.get("status"),None
+    if response.get("status")!=200:
+        from .source_health import CURRENT
+        attempt=CURRENT.get()
+        if attempt: attempt.record(f"http_{response.get('status')}",response.get("retry_after"))
+        return response.get("status"),None
     body=base64.b64decode(response["body"],validate=True)
     if len(body)>MAX_BYTES: raise DiagnosticError("response_too_large")
     return 200,json.loads(body)
@@ -177,6 +181,15 @@ def parse_digest(payload: dict, lookback: float, limit: int, now: datetime | Non
 def fetch(lookback: float, limit: int) -> list[DeskResult]:
     if os.getenv("AGENT_NEWSBOT_WORLDMONITOR_ENABLED", "").lower() not in ("1", "true", "yes"):
         return []
+    from .source_health import SourceHealth
+    from .config import HOME
+    base=os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000")
+    variant=os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full")
+    return SourceHealth(HOME/"source-health.sqlite").run("worldmonitor:"+base+":"+variant,"World Monitor digest","world",
+        lambda: _collect(lookback,limit),provider="worldmonitor")
+
+
+def _collect(lookback,limit):
     try:
         return retrieve(os.getenv("AGENT_NEWSBOT_WORLDMONITOR_URL", "http://127.0.0.1:3000"),
                         os.getenv("AGENT_NEWSBOT_WORLDMONITOR_VARIANT", "full"),

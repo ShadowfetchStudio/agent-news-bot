@@ -2,6 +2,27 @@ import Foundation
 
 enum RSSClient {
     static func fetch(desk: Desk, lookbackHours: Double, maxItems: Int, store: FreshnessStore, feeds: [FeedSource]? = nil) async -> DeskResult {
+        var combined = DeskResult(desk:desk,articles:[],skippedOld:0,skippedDup:0,sourceErrors:[])
+        var seen = Set<String>()
+        for feed in feeds ?? FeedRegistry.feeds(for:desk) {
+            let results = await store.health.run(key:"direct:rss:" + desk.rawValue + ":" + feed.url,source:feed.label + " · " + desk.title,desk:desk) {
+                [await collect(desk:desk,lookbackHours:lookbackHours,maxItems:maxItems,store:store,feeds:[feed])]
+            }
+            for result in results {
+                combined.skippedOld += result.skippedOld; combined.skippedDup += result.skippedDup
+                combined.sourceErrors += result.sourceErrors; combined.sourceChecks += result.sourceChecks
+                combined.cacheUpdates += result.cacheUpdates
+                for article in result.articles {
+                    if seen.insert(article.url).inserted { combined.articles.append(article) } else { combined.skippedDup += 1 }
+                }
+            }
+        }
+        combined.articles.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        combined.articles = Array(combined.articles.prefix(maxItems))
+        return combined
+    }
+
+    private static func collect(desk: Desk, lookbackHours: Double, maxItems: Int, store: FreshnessStore, feeds: [FeedSource]? = nil) async -> DeskResult {
         var collected: [Article] = []
         var errors: [String] = []
         var checks: [SourceCheck] = []

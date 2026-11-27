@@ -26,6 +26,7 @@ final class AgentBridge: @unchecked Sendable {
     var desksProvider: () -> [DeskResult] = { [] }
     var statusProvider: () -> BridgeStatusSnapshot = { BridgeStatusSnapshot(fresh: 0, fetchedAt: nil, fetching: false) }
     var stories: StoryStore?
+    var sourceHealth = SourceHealth.shared
     var fetchHandler: (() async throws -> Int)?
     var groupRepairHandler: (() -> String?)?
 
@@ -256,6 +257,12 @@ final class AgentBridge: @unchecked Sendable {
                 } else {
                     response = json(404, ["error": "article not found"])
                 }
+            }
+        } else if path == "/v1/sources" {
+            if !queryItems.isEmpty { response = json(400,["error":"sources does not accept query parameters"]) }
+            else {
+                do { response = json(200,["sources":try sourceHealth.list()]) }
+                catch { response = json(503,["error":"source health storage unavailable"]) }
             }
         } else if path == "/v1/desks" {
             if method != "GET" {

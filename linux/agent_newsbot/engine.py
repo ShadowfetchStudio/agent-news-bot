@@ -53,6 +53,23 @@ def _get(
 
 
 def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
+    combined = DeskResult(desk, [])
+    seen = set()
+    for url,label in RSS_FEEDS.get(desk, []):
+        results=store.health.run("direct:rss:"+desk+":"+url,label+" · "+DESK_TITLES[desk],desk,lambda: [_collect_rss(desk,store,lookback,limit,[(url,label)])])
+        for result in results:
+            combined.skipped_old+=result.skipped_old; combined.skipped_dup+=result.skipped_dup
+            combined.source_errors.extend(result.source_errors); combined.source_checks.extend(result.source_checks)
+            combined.feed_cache_updates.extend(result.feed_cache_updates)
+            for article in result.articles:
+                if article.url in seen: combined.skipped_dup+=1
+                else: seen.add(article.url); combined.articles.append(article)
+    combined.articles.sort(key=lambda a:a.published or "",reverse=True)
+    combined.articles=combined.articles[:limit]
+    return combined
+
+
+def _collect_rss(desk,store,lookback,limit,feeds):
     collected: list[Article] = []
     errors: list[str] = []
     skipped_old = 0
@@ -60,7 +77,7 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
     seen_urls: set[str] = set()
     cache_updates = []
     checks = []
-    for url, label in RSS_FEEDS.get(desk, []):
+    for url, label in feeds:
         try:
             etag, last_mod = store.feed_cache(url)
             document = store.feed_document(url)
@@ -145,6 +162,10 @@ def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> 
 
 
 def fetch_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
+    return store.health.run("direct:hackerNews", "Hacker News", "hackerNews", lambda: [_collect_hn(store, lookback, limit)])[0]
+
+
+def _collect_hn(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
     errors: list[str] = []
     checks = []
     skipped_old = 0
@@ -223,6 +244,10 @@ def _num(value: Any) -> float:
 
 
 def fetch_polymarket(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
+    return store.health.run("direct:polymarket", "Polymarket", "polymarket", lambda: [_collect_polymarket(store, lookback, limit)])[0]
+
+
+def _collect_polymarket(store: FreshnessStore, lookback: float, limit: int) -> DeskResult:
     errors: list[str] = []
     checks = []
     skipped_dup = 0
@@ -291,6 +316,10 @@ SYMBOL_NAMES = {"^GSPC": "S&P 500", "^DJI": "Dow", "^IXIC": "Nasdaq"}
 
 
 def fetch_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult:
+    return store.health.run("direct:markets:" + symbols, "Yahoo Finance", "markets", lambda: [_collect_markets(store, symbols, limit)])[0]
+
+
+def _collect_markets(store: FreshnessStore, symbols: str, limit: int) -> DeskResult:
     quote_updates = []
     errors: list[str] = []
     checks = []
@@ -378,6 +407,10 @@ WX = {
 
 
 def fetch_weather(store: FreshnessStore, city: str) -> DeskResult:
+    return store.health.run("direct:weather:" + city, "Open-Meteo", "weather", lambda: [_collect_weather(store, city)])[0]
+
+
+def _collect_weather(store: FreshnessStore, city: str) -> DeskResult:
     query = city.strip()
     if not query:
         return DeskResult("weather", [], 0, 0, ["Set AGENT_NEWSBOT_WEATHER_CITY"])

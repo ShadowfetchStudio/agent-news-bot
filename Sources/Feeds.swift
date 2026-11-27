@@ -12,8 +12,7 @@ enum FeedRegistry {
             return [
                 .init(url: "https://feeds.npr.org/1001/rss.xml", label: "NPR"),
                 .init(url: "https://feeds.bbci.co.uk/news/rss.xml", label: "BBC"),
-                .init(url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", label: "NY Times"),
-                .init(url: "https://feeds.apnews.com/rss/apf-topnews", label: "AP")
+                .init(url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", label: "NY Times")
             ]
         case .politics:
             return [
@@ -29,15 +28,14 @@ enum FeedRegistry {
                 .init(url: "https://feeds.npr.org/1004/rss.xml", label: "NPR World"),
                 .init(url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", label: "NY Times World"),
                 .init(url: "https://www.aljazeera.com/xml/rss/all.xml", label: "Al Jazeera"),
-                .init(url: "https://rss.dw.com/rdf/rss-en-all", label: "Deutsche Welle"),
-                .init(url: "https://feeds.apnews.com/rss/apf-intlnews", label: "AP World")
+                .init(url: "https://rss.dw.com/rdf/rss-en-all", label: "Deutsche Welle")
             ]
         case .business:
             return [
                 .init(url: "https://feeds.npr.org/1006/rss.xml", label: "NPR Business"),
                 .init(url: "https://feeds.bbci.co.uk/news/business/rss.xml", label: "BBC Business"),
                 .init(url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", label: "CNBC"),
-                .init(url: "https://finance.yahoo.com/news/rssindex", label: "Yahoo Finance"),
+                .init(url: "https://www.federalreserve.gov/feeds/press_all.xml", label: "Federal Reserve releases"),
                 .init(url: "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", label: "MarketWatch")
             ]
         case .tech:
@@ -76,7 +74,7 @@ enum FeedRegistry {
                 .init(url: "https://feeds.npr.org/1128/rss.xml", label: "NPR Health"),
                 .init(url: "https://feeds.bbci.co.uk/news/health/rss.xml", label: "BBC Health"),
                 .init(url: "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml", label: "NY Times Health"),
-                .init(url: "https://www.medicalnewstoday.com/rss", label: "Medical News Today")
+                .init(url: "https://www.cancer.gov/publishedcontent/rss/syndication/rss/ncinewsreleases.rss", label: "National Cancer Institute releases")
             ]
         case .entertainment:
             return [

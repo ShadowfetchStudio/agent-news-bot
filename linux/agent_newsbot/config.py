@@ -63,7 +63,6 @@ RSS_FEEDS = {
         ("https://feeds.npr.org/1001/rss.xml", "NPR"),
         ("https://feeds.bbci.co.uk/news/rss.xml", "BBC"),
         ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "NY Times"),
-        ("https://feeds.apnews.com/rss/apf-topnews", "AP"),
     ],
     "politics": [
         ("https://feeds.npr.org/1014/rss.xml", "NPR Politics"),
@@ -78,13 +77,12 @@ RSS_FEEDS = {
         ("https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "NY Times World"),
         ("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera"),
         ("https://rss.dw.com/rdf/rss-en-all", "Deutsche Welle"),
-        ("https://feeds.apnews.com/rss/apf-intlnews", "AP World"),
     ],
     "business": [
         ("https://feeds.npr.org/1006/rss.xml", "NPR Business"),
         ("https://feeds.bbci.co.uk/news/business/rss.xml", "BBC Business"),
         ("https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", "CNBC"),
-        ("https://finance.yahoo.com/news/rssindex", "Yahoo Finance"),
+        ("https://www.federalreserve.gov/feeds/press_all.xml", "Federal Reserve releases"),
         ("https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines", "MarketWatch"),
     ],
     "tech": [
@@ -119,7 +117,7 @@ RSS_FEEDS = {
         ("https://feeds.npr.org/1128/rss.xml", "NPR Health"),
         ("https://feeds.bbci.co.uk/news/health/rss.xml", "BBC Health"),
         ("https://rss.nytimes.com/services/xml/rss/nyt/Health.xml", "NY Times Health"),
-        ("https://www.medicalnewstoday.com/rss", "Medical News Today"),
+        ("https://www.cancer.gov/publishedcontent/rss/syndication/rss/ncinewsreleases.rss", "National Cancer Institute releases"),
     ],
     "entertainment": [
         ("https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml", "BBC Entertainment"),

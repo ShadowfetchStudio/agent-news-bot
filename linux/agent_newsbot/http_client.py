@@ -36,6 +36,16 @@ class Response:
 
 
 def get(url, *, headers=None, timeout=14):
+    from .source_health import CURRENT
+    attempt = CURRENT.get()
+    if attempt: attempt.check()
+    try: return _get(url, headers=headers, timeout=timeout)
+    except RequestFailure as error:
+        if attempt: attempt.record(f"http_{error.status}" if error.status else error.code, error.retry_after)
+        raise
+
+
+def _get(url, *, headers=None, timeout=14):
     if not 0 < timeout <= 120:
         raise ValueError('HTTP deadline must be greater than zero and at most 120 seconds')
     job = json.dumps({'url': url, 'headers': headers or {}, 'timeout': timeout}).encode()

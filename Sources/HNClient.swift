@@ -2,6 +2,13 @@ import Foundation
 
 enum HNClient {
     static func fetch(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
+        let results = await store.health.run(key: "direct:hackerNews", source: "Hacker News", desk: .hackerNews) {
+            [await collect(lookbackHours: lookbackHours, maxItems: maxItems, store: store)]
+        }
+        return results[0]
+    }
+
+    private static func collect(lookbackHours: Double, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
         var checks: [SourceCheck] = []
         var skippedOld = 0

@@ -2,6 +2,13 @@ import Foundation
 
 enum MarketsClient {
     static func fetch(symbols: String, maxItems: Int, store: FreshnessStore) async -> DeskResult {
+        let results = await store.health.run(key: "direct:markets:" + symbols, source: "Yahoo Finance", desk: .markets) {
+            [await collect(symbols: symbols, maxItems: maxItems, store: store)]
+        }
+        return results[0]
+    }
+
+    private static func collect(symbols: String, maxItems: Int, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
         var checks: [SourceCheck] = []
         var skippedDup = 0

@@ -4,6 +4,33 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "health-network" {
+            let health = SourceHealth(path: URL(fileURLWithPath:args[2]))
+            let results = await health.run(key:"network-fixture",source:"Fixture",desk:.science) {
+                var errors: [String] = []
+                for _ in 0..<10 {
+                    do { _ = try await Net.data(from:URL(string:args[3])!) }
+                    catch { errors.append("request failed") }
+                }
+                return [DeskResult(desk:.science,articles:[],skippedOld:0,skippedDup:0,sourceErrors:errors)]
+            }
+            try output(["coverage":Coverage.summary(results.flatMap(\.coverageChecks)),"history":try health.list()]); return
+        }
+        if args[1] == "health" {
+            let health = SourceHealth(path:URL(fileURLWithPath:args[2])), now = Double(args[4])!
+            do {
+                switch args[3] {
+                case "begin":
+                    let (lease,row) = try health.begin(key:args[5],source:"Fixture",now:now)
+                    try output(["lease":lease as Any? ?? NSNull(),"row":row])
+                case "finish":
+                    try output(try health.finish(key:args[5],lease:args[6],state:args[7],code:args.count>8 ? args[8] : "",retryAt:args.count>9 ? Double(args[9])! : 0,now:now))
+                case "retry": try output(["retry_at":SourceHealth.retryTime(args[5],now:now)])
+                default: try output(["sources":try health.list(now:now)])
+                }
+            } catch { try output(["error":"health storage or request failure"]) }
+            return
+        }
         if args[1] == "setup-policy" {
             let values = await MainActor.run { () -> [String: Any] in
                 let name = "ai.shadowfetch.agentnewsbot.setup-test." + UUID().uuidString
@@ -235,6 +262,7 @@ import Security
         if args[1].hasPrefix("serve") {
             let bridge = AgentBridge()
             bridge.stories = store
+            bridge.sourceHealth = SourceHealth(path: URL(fileURLWithPath: args[2]).deletingLastPathComponent().appendingPathComponent("source-health.sqlite"))
             if args[1] == "serve-slow" || args[1] == "serve-fail" {
                 bridge.fetchHandler = {
                     try await Task.sleep(nanoseconds: 2_000_000_000)

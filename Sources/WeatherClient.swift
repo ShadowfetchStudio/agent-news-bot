@@ -2,6 +2,13 @@ import Foundation
 
 enum WeatherClient {
     static func fetch(city: String, store: FreshnessStore) async -> DeskResult {
+        let results = await store.health.run(key: "direct:weather:" + city, source: "Open-Meteo", desk: .weather) {
+            [await collect(city: city, store: store)]
+        }
+        return results[0]
+    }
+
+    private static func collect(city: String, store: FreshnessStore) async -> DeskResult {
         var errors: [String] = []
         let query = city.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {

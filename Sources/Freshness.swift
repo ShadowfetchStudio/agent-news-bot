@@ -5,8 +5,10 @@ import CryptoKit
 final class FreshnessStore: @unchecked Sendable {
     private let lock = NSLock()
     private var db: OpaquePointer?
+    let health: SourceHealth
 
     init(path: URL) {
+        health = SourceHealth(path: path.deletingLastPathComponent().appendingPathComponent("source-health.sqlite"))
         do { try AppPaths.prepareDatabase(path) } catch { return }
         if sqlite3_open(path.path, &db) != SQLITE_OK {
             db = nil
