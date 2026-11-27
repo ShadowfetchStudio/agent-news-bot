@@ -2,6 +2,22 @@
 
 Scope: repair every finding in the November 27 four-perspective audit, implement the identified usability and operational improvements, create the app icon, update documentation, and publish tested source and downloadable packages to GitHub. A passing unit suite alone does not close this checklist.
 
+## Follow-up four-perspective audit
+
+The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found nine additional defects after the original repair batches. These are separate from B01–B14; passing those regressions does not close the findings below.
+
+- [ ] R01: fail visibly and preserve data when native bridge credentials cannot be persisted; stable cached credential and explicit rotation.
+- [ ] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
+- [ ] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
+- [ ] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
+- [ ] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
+- [ ] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
+- [ ] R07: return a controlled unauthorized response for malformed/non-ASCII credentials.
+- [ ] R08: enforce byte and total-time limits while receiving every provider response, not after buffering.
+- [ ] R09: surface native snapshot/export persistence failures without losing the preceding valid snapshot.
+
+Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS suite 80 passed/47 Mac-only skips; Apple Silicon build and strict ad-hoc signature verification passed. New isolated fixtures reproduce R01–R08 (R04's desktop dispatch is code-confirmed, not executed; R08 total-time risk is code-confirmed). R09 is code-confirmed. The live 54-feed sweep returned 48 feeds with parseable entries, five request/HTTP failures and one valid empty feed. This remains a development checkout, not the final published release.
+
 ## Defects (audit IDs)
 
 - [x] B01: disconnected native clients cannot terminate the app; bounded responses.

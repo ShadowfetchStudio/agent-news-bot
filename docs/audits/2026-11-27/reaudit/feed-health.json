@@ -1,0 +1,477 @@
+{
+  "expected": 54,
+  "completed": 54,
+  "sources": [
+    {
+      "url": "https://feeds.apnews.com/rss/apf-topnews",
+      "source": "AP",
+      "checked_at": "2026-11-27T13:06:44.521085+00:00",
+      "error": "ConnectionError"
+    },
+    {
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+      "source": "NY Times",
+      "checked_at": "2026-11-27T13:06:44.563265+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+      "source": "NY Times",
+      "checked_at": "2026-11-27T13:06:44.517966+00:00",
+      "http": 200,
+      "entries": 16,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1014/rss.xml",
+      "source": "NPR Politics",
+      "checked_at": "2026-11-27T13:06:44.521716+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1001/rss.xml",
+      "source": "NPR",
+      "checked_at": "2026-11-27T13:06:44.517549+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/rss.xml",
+      "source": "BBC",
+      "checked_at": "2026-11-27T13:06:44.517910+00:00",
+      "http": 200,
+      "entries": 32,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1004/rss.xml",
+      "source": "NPR World",
+      "checked_at": "2026-11-27T13:06:44.692943+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.politico.com/politics-news.xml",
+      "source": "Politico",
+      "checked_at": "2026-11-27T13:06:44.655954+00:00",
+      "http": 200,
+      "entries": 30,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://thehill.com/feed/",
+      "source": "The Hill",
+      "checked_at": "2026-11-27T13:06:44.656267+00:00",
+      "http": 200,
+      "entries": 100,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.apnews.com/rss/apf-intlnews",
+      "source": "AP World",
+      "checked_at": "2026-11-27T13:06:44.871693+00:00",
+      "error": "ConnectionError"
+    },
+    {
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+      "source": "NY Times World",
+      "checked_at": "2026-11-27T13:06:44.781479+00:00",
+      "http": 200,
+      "entries": 60,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "source": "BBC World",
+      "checked_at": "2026-11-27T13:06:44.685884+00:00",
+      "http": 200,
+      "entries": 35,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+      "source": "BBC Politics",
+      "checked_at": "2026-11-27T13:06:44.522292+00:00",
+      "http": 200,
+      "entries": 61,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1006/rss.xml",
+      "source": "NPR Business",
+      "checked_at": "2026-11-27T13:06:44.873484+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "source": "Al Jazeera",
+      "checked_at": "2026-11-27T13:06:44.809872+00:00",
+      "http": 200,
+      "entries": 25,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/business/rss.xml",
+      "source": "BBC Business",
+      "checked_at": "2026-11-27T13:06:44.896676+00:00",
+      "http": 200,
+      "entries": 53,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
+      "source": "MarketWatch",
+      "checked_at": "2026-11-27T13:06:45.066800+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "source": "Yahoo Finance",
+      "checked_at": "2026-11-27T13:06:44.920546+00:00",
+      "http": 404
+    },
+    {
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "source": "Ars Technica",
+      "checked_at": "2026-11-27T13:06:45.105708+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.theverge.com/rss/index.xml",
+      "source": "The Verge",
+      "checked_at": "2026-11-27T13:06:45.138065+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "atom10",
+      "truncated": false
+    },
+    {
+      "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+      "source": "CNBC",
+      "checked_at": "2026-11-27T13:06:44.912342+00:00",
+      "http": 200,
+      "entries": 30,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.wired.com/feed/rss",
+      "source": "Wired",
+      "checked_at": "2026-11-27T13:06:45.200820+00:00",
+      "http": 200,
+      "entries": 50,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
+      "source": "BBC Technology",
+      "checked_at": "2026-11-27T13:06:45.241818+00:00",
+      "http": 200,
+      "entries": 21,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+      "source": "TechCrunch AI",
+      "checked_at": "2026-11-27T13:06:45.336632+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+      "source": "Verge AI",
+      "checked_at": "2026-11-27T13:06:45.398203+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "atom10",
+      "truncated": false
+    },
+    {
+      "url": "https://simonwillison.net/atom/everything/",
+      "source": "Simon Willison",
+      "checked_at": "2026-11-27T13:06:45.521345+00:00",
+      "http": 200,
+      "entries": 30,
+      "format": "atom10",
+      "truncated": false
+    },
+    {
+      "url": "https://www.technologyreview.com/feed/",
+      "source": "MIT Tech Review",
+      "checked_at": "2026-11-27T13:06:45.515870+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://huggingface.co/blog/feed.xml",
+      "source": "Hugging Face",
+      "checked_at": "2026-11-27T13:06:45.548503+00:00",
+      "http": 200,
+      "entries": 919,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.feedburner.com/TechCrunch",
+      "source": "TechCrunch",
+      "checked_at": "2026-11-27T13:06:45.182959+00:00",
+      "http": 200,
+      "entries": 19,
+      "format": "rss20",
+      "truncated": true
+    },
+    {
+      "url": "https://blogs.nvidia.com/blog/category/generative-ai/feed/",
+      "source": "NVIDIA AI",
+      "checked_at": "2026-11-27T13:06:45.712790+00:00",
+      "http": 200,
+      "entries": 18,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.arxiv.org/rss/cs.LG",
+      "source": "arXiv cs.LG",
+      "checked_at": "2026-11-27T13:06:46.066959+00:00",
+      "http": 200,
+      "entries": 0,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://venturebeat.com/category/ai/feed/",
+      "source": "VentureBeat AI",
+      "checked_at": "2026-11-27T13:06:45.907797+00:00",
+      "http": 429
+    },
+    {
+      "url": "https://blog.google/technology/ai/rss/",
+      "source": "Google AI",
+      "checked_at": "2026-11-27T13:06:45.696496+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1007/rss.xml",
+      "source": "NPR Science",
+      "checked_at": "2026-11-27T13:06:46.148733+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.wired.com/feed/tag/ai/latest/rss",
+      "source": "Wired AI",
+      "checked_at": "2026-11-27T13:06:46.147795+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.arxiv.org/rss/cs.AI",
+      "source": "arXiv cs.AI",
+      "checked_at": "2026-11-27T13:06:46.008291+00:00",
+      "http": 200,
+      "entries": 242,
+      "format": "rss20",
+      "truncated": true
+    },
+    {
+      "url": "https://www.theregister.com/headlines.atom",
+      "source": "The Register",
+      "checked_at": "2026-11-27T13:06:45.315387+00:00",
+      "http": 200,
+      "entries": 50,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+      "source": "NY Times Science",
+      "checked_at": "2026-11-27T13:06:46.311283+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1128/rss.xml",
+      "source": "NPR Health",
+      "checked_at": "2026-11-27T13:06:46.419321+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+      "source": "NASA",
+      "checked_at": "2026-11-27T13:06:46.404525+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.sciencedaily.com/rss/all.xml",
+      "source": "ScienceDaily",
+      "checked_at": "2026-11-27T13:06:46.318209+00:00",
+      "http": 200,
+      "entries": 60,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+      "source": "BBC Health",
+      "checked_at": "2026-11-27T13:06:46.455316+00:00",
+      "http": 200,
+      "entries": 57,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",
+      "source": "NY Times Health",
+      "checked_at": "2026-11-27T13:06:46.642619+00:00",
+      "http": 200,
+      "entries": 20,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+      "source": "BBC Science",
+      "checked_at": "2026-11-27T13:06:46.262276+00:00",
+      "http": 200,
+      "entries": 42,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://variety.com/feed/",
+      "source": "Variety",
+      "checked_at": "2026-11-27T13:06:46.719383+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://rss.dw.com/rdf/rss-en-all",
+      "source": "Deutsche Welle",
+      "checked_at": "2026-11-27T13:06:44.847387+00:00",
+      "http": 200,
+      "entries": 144,
+      "format": "rss10",
+      "truncated": false
+    },
+    {
+      "url": "https://deadline.com/feed/",
+      "source": "Deadline",
+      "checked_at": "2026-11-27T13:06:46.788845+00:00",
+      "http": 200,
+      "entries": 12,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+      "source": "BBC Entertainment",
+      "checked_at": "2026-11-27T13:06:46.711621+00:00",
+      "http": 200,
+      "entries": 26,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.medicalnewstoday.com/rss",
+      "source": "Medical News Today",
+      "checked_at": "2026-11-27T13:06:46.710995+00:00",
+      "http": 404
+    },
+    {
+      "url": "https://www.hollywoodreporter.com/feed/",
+      "source": "Hollywood Reporter",
+      "checked_at": "2026-11-27T13:06:46.816339+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.npr.org/1055/rss.xml",
+      "source": "NPR Sports",
+      "checked_at": "2026-11-27T13:06:46.847621+00:00",
+      "http": 200,
+      "entries": 10,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://www.espn.com/espn/rss/news",
+      "source": "ESPN",
+      "checked_at": "2026-11-27T13:06:46.933765+00:00",
+      "http": 200,
+      "entries": 39,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://sports.yahoo.com/rss/",
+      "source": "Yahoo Sports",
+      "checked_at": "2026-11-27T13:06:46.942803+00:00",
+      "http": 200,
+      "entries": 50,
+      "format": "rss20",
+      "truncated": false
+    },
+    {
+      "url": "https://feeds.bbci.co.uk/sport/rss.xml",
+      "source": "BBC Sport",
+      "checked_at": "2026-11-27T13:06:46.925396+00:00",
+      "http": 200,
+      "entries": 67,
+      "format": "rss20",
+      "truncated": false
+    }
+  ]
+}

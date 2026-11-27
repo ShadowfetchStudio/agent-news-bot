@@ -1,0 +1,79 @@
+{
+  "head": "77e237389c0247b838384fc5a531cd47c627b7e6",
+  "work": "/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-followup-audit-lh0mwis2",
+  "observed_at": "2026-11-27T13:07:16.451770+00:00",
+  "non_ascii_auth_python": "",
+  "non_ascii_auth_python_errors": [
+    "TypeError"
+  ],
+  "slow_headers_python": {
+    "open_clients": 8,
+    "wait_seconds": 6,
+    "additional_threads": 8
+  },
+  "non_ascii_auth_swift": "HTTP/1.1 401 Unauthorized",
+  "unrelated_service_hermes_probe": {
+    "ready": true
+  },
+  "invalid_completion_hermes_send": {
+    "output": "{}"
+  },
+  "per_desk_cap_python": {
+    "requested_max": 20,
+    "science_displayed": 40
+  },
+  "per_desk_cap_swift": {
+    "requested_max": 20,
+    "science_displayed": 40
+  },
+  "unsafe_rss_python": {
+    "urls": [
+      "file://tmp/audit-unused.txt"
+    ],
+    "errors": []
+  },
+  "unsafe_rss_swift": {
+    "urls": [
+      "file:///tmp/audit-unused.txt"
+    ],
+    "errors": []
+  },
+  "direct_http_python": {
+    "downloaded_bytes": 6291456,
+    "rss_limit_bytes": 4194304
+  },
+  "direct_http_swift": {
+    "fixture_sent_bytes": 6291456,
+    "errors": [
+      "Fixture: feed unreachable"
+    ]
+  },
+  "wm_total_deadline": {
+    "result": "timeout",
+    "elapsed_seconds": 1.0
+  },
+  "different_actor_group_python": {
+    "stories": 1,
+    "source_counts": [
+      2
+    ],
+    "disagreement": [
+      false
+    ],
+    "input_titles": [
+      "NASA launches new lunar orbiter to map south pole craters",
+      "China launches new lunar orbiter to map south pole craters"
+    ]
+  },
+  "different_actor_group_swift": {
+    "stories": 1,
+    "source_counts": [
+      2
+    ]
+  },
+  "native_token_write_failure": {
+    "same_token": false,
+    "token_path_is_directory": true,
+    "returned_length": 32
+  }
+}

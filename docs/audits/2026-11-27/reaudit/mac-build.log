@@ -1,0 +1,10 @@
+==> Cleaning
+==> Icon
+wrote /Volumes/NVME1TB/Development/github-cleanup-2026-11-13/checkouts/agent-news-bot/build/icon-1024.png
+==> Compiling (arm64)
+==> Info.plist
+==> Ad-hoc sign
+/Volumes/NVME1TB/Development/github-cleanup-2026-11-13/checkouts/agent-news-bot/build/Agent News Bot.app: replacing existing signature
+Built: /Volumes/NVME1TB/Development/github-cleanup-2026-11-13/checkouts/agent-news-bot/build/Agent News Bot.app
+To install a new copy: ./build.sh --install
+Existing NewsBot applications and saved data were preserved.
