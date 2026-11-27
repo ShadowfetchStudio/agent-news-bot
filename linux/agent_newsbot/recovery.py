@@ -38,6 +38,7 @@ SCHEMAS = {
     },
     "source-health.sqlite": {"source_health": "id payload"},
 }
+OPTIONAL_SCHEMAS = {"stories.sqlite": {"journal_retention": "id payload"}}
 EXCLUDED = ["bridge credentials", "Keychain secrets", "application preferences and Linux config",
             "exported files and snapshots", "agent inboxes/outboxes", "application binaries"]
 
@@ -93,10 +94,11 @@ def inspect(path: Path, name: str, deadline: float):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type IN ('view','trigger') LIMIT 1").fetchone():
             raise RecoveryError("Unexpected executable database schema")
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if tables != set(SCHEMAS[name]):
+        optional = OPTIONAL_SCHEMAS.get(name, {})
+        if not set(SCHEMAS[name]) <= tables or tables - set(SCHEMAS[name]) - set(optional):
             raise RecoveryError(f"Unsupported database schema: {name}")
         counts = {}
-        for table, fields in SCHEMAS[name].items():
+        for table, fields in {**SCHEMAS[name], **{k:v for k,v in optional.items() if k in tables}}.items():
             if [r[1] for r in db.execute(f'PRAGMA table_info("{table}")')] != fields.split():
                 raise RecoveryError(f"Unsupported table schema: {table}")
             counts[table] = db.execute(f'SELECT count(*) FROM "{table}"').fetchone()[0]
@@ -108,6 +110,16 @@ def inspect(path: Path, name: str, deadline: float):
                     if db.execute(f'SELECT 1 FROM "{table}" WHERE {invalid} LIMIT 1').fetchone():
                         raise RecoveryError(f"Invalid JSON record: {table}")
         if name == "stories.sqlite":
+            if "journal_retention" in tables:
+                rows = db.execute("SELECT id,payload FROM journal_retention").fetchall()
+                if len(rows) > 1 or any(row[0] != 1 for row in rows):
+                    raise RecoveryError("Invalid retention state")
+                if rows:
+                    state = json.loads(rows[0][1])
+                    floor = state.get("pruned_through")
+                    latest = db.execute("SELECT coalesce(max(seq),0) FROM events").fetchone()[0]
+                    if type(floor) is not int or not 0 <= floor <= latest or db.execute("SELECT 1 FROM consumers WHERE cursor<?", (floor,)).fetchone():
+                        raise RecoveryError("Invalid retention boundary or consumer checkpoint")
             # Referential checks that SQLite foreign keys cannot cover in this schema.
             for table in ("members", "events", "identity_aliases", "editorial"):
                 if db.execute(f'SELECT 1 FROM "{table}" r LEFT JOIN stories s ON s.id=r.story_id WHERE s.id IS NULL LIMIT 1').fetchone():

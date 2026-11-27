@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "GroupRepairStore", "EditorialBrief", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "RetentionStore", "LibraryStore", "GroupRepairStore", "EditorialBrief", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest

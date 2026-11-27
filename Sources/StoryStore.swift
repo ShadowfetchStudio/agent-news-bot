@@ -31,6 +31,7 @@ final class StoryStore: @unchecked Sendable {
             "CREATE TABLE IF NOT EXISTS library_preferences(kind TEXT NOT NULL,name TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(kind,name))"
         ] { try run(db, sql) }
         try run(db, ConsumerSchema.sql)
+        try run(db, RetentionSchema.sql)
         try run(db, "CREATE TABLE IF NOT EXISTS group_repairs(id TEXT PRIMARY KEY,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)")
         try run(db, "BEGIN IMMEDIATE")
         do {
@@ -254,7 +255,9 @@ final class StoryStore: @unchecked Sendable {
                         diff[field] = ["before": previous[field] ?? NSNull(), "after": story[field] ?? NSNull()]
                     }
                 }
-                result.append(["seq": Int(row[0]) ?? 0, "story": story, "diff": diff])
+                let gap = (story["revision"] as? Int ?? 0) > (previous["revision"] as? Int ?? 0) + 1
+                result.append(["seq": Int(row[0]) ?? 0, "story": story, "diff": gap ? [:] : diff,
+                               "history_gap_before": gap])
                 previous = story
             }
             return Array(result.suffix(limit))
@@ -271,11 +274,12 @@ final class StoryStore: @unchecked Sendable {
             let generation = try deliveryGuard(db, consumer: consumer, lease: lease)
             let row = try run(db, "SELECT cursor,offered FROM consumers WHERE name=?", [consumer])[0]
             let cursor = Int(row[0]) ?? 0, offered = Int(row[1]) ?? 0
+            let floor = try retainedGuard(db, cursor: cursor)
             let rows = try run(db, "SELECT seq,payload FROM events WHERE seq>? ORDER BY seq LIMIT ?", [String(cursor), String(limit)])
             let end = rows.last.flatMap { Int($0[0]) } ?? cursor
             try run(db, "UPDATE consumers SET offered=? WHERE name=?", [String(max(offered, end)), consumer])
             let events: [[String: Any]] = try rows.map { ["seq": Int($0[0]) ?? 0, "story": try decode($0[1])] }
-            return ["consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": events.count, "events": events]
+            return ["consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": events.count, "events": events, "pruned_through": floor]
         }
     }
     func acknowledge(consumer: String, through: Int, generation: Int? = nil, lease: String? = nil) throws -> [String: Any] {
@@ -284,6 +288,7 @@ final class StoryStore: @unchecked Sendable {
             let generation = try deliveryGuard(db, consumer: consumer, generation: generation, lease: lease, ack: true)
             guard let row = try run(db, "SELECT cursor,offered FROM consumers WHERE name=?", [consumer]).first,
                   through >= 0, through <= (Int(row[1]) ?? 0) else { throw Failure.invalidAcknowledgement }
+            _ = try retainedGuard(db, cursor: Int(row[0]) ?? 0)
             let cursor = max(Int(row[0]) ?? 0, through)
             try run(db, "UPDATE consumers SET cursor=? WHERE name=?", [String(cursor), consumer])
             try run(db, "UPDATE consumer_meta SET last_ack=? WHERE name=?", [String(Date().timeIntervalSince1970), consumer])

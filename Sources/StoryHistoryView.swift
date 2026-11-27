@@ -3,6 +3,7 @@ import SwiftUI
 private struct StoryHistoryEntry: Identifiable, Sendable {
     let id: Int
     let revision: Int
+    let gap: Bool
     let change: String
     let time: String
     let oldTitle: String?
@@ -28,6 +29,10 @@ struct StoryHistoryView: View {
             ForEach(entries) { entry in
                 DisclosureGroup("Revision \(entry.revision) · \(entry.change.capitalized)") {
                     VStack(alignment: .leading, spacing: 8) {
+                        if entry.gap {
+                            Text("Earlier revisions are outside this retained page. No adjacent-revision comparison is shown; consult your research archive for archived history.")
+                                .font(.caption).foregroundStyle(Theme.warning)
+                        }
                         Text(entry.time).font(.caption).foregroundStyle(Theme.textLow)
                         if let old = entry.oldTitle, old != entry.title {
                             Text("Earlier headline").font(.caption.bold())
@@ -59,12 +64,13 @@ struct StoryHistoryView: View {
                         let diff = row["diff"] as? [String: [String: Any]] ?? [:]
                         return StoryHistoryEntry(id: row["seq"] as? Int ?? 0,
                             revision: story["revision"] as? Int ?? 0,
+                            gap: row["history_gap_before"] as? Bool ?? false,
                             change: story["change"] as? String ?? "recorded",
                             time: story["updated_at"] as? String ?? "",
                             oldTitle: diff["title"]?["before"] as? String,
                             title: story["title"] as? String ?? "",
                             oldSummary: diff["summary"]?["before"] as? String,
-                            summary: diff["summary"]?["after"] as? String,
+                            summary: (diff["summary"]?["after"] ?? story["summary"]) as? String,
                             fields: diff.keys.sorted())
                     }
                 }.value

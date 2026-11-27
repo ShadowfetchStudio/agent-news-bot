@@ -13,6 +13,7 @@ from .store import canonical_url, title_tokens, is_near_duplicate_title, article
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
 from .group_repairs import GroupRepairMixin, REPAIR_SCHEMA
+from .retention import SCHEMA as RETENTION_SCHEMA, retained_guard
 from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
 from .private_files import private_database
 from .url_safety import safe_article_url
@@ -82,6 +83,7 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
 
             for sql in SCHEMA: db.execute(sql)
             db.execute(CONSUMER_SCHEMA)
+            db.execute(RETENTION_SCHEMA)
             db.execute(REPAIR_SCHEMA)
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM migrations WHERE name='canonical-v2'").fetchone():
@@ -204,7 +206,9 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
         for seq, raw in rows:
             story = json.loads(raw)
             changes = {k: {"before": previous.get(k), "after": story.get(k)} for k in ("title", "summary", "sources", "desks", "disagreement") if previous.get(k) != story.get(k)}
-            result.append({"seq": seq, "story": story, "diff": changes})
+            gap = story.get("revision", 0) > previous.get("revision", 0) + 1
+            result.append({"seq": seq, "story": story, "diff": {} if gap else changes,
+                           "history_gap_before": gap})
             previous = story
         return result[-limit:]
 
@@ -222,11 +226,12 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
             db.execute("INSERT OR IGNORE INTO consumers(name) VALUES (?)", (consumer,))
             generation = delivery_guard(db, consumer, lease=lease)
             cursor, offered = db.execute("SELECT cursor,offered FROM consumers WHERE name=?", (consumer,)).fetchone()
+            floor = retained_guard(db, cursor)
             rows = db.execute("SELECT seq,payload FROM events WHERE seq>? ORDER BY seq LIMIT ?", (cursor, limit)).fetchall()
             end = rows[-1][0] if rows else cursor
             db.execute("UPDATE consumers SET offered=? WHERE name=?", (max(offered, end), consumer))
             events = [{"seq": seq, "story": json.loads(payload)} for seq, payload in rows]
-            return {"consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": len(events), "events": events}
+            return {"consumer": consumer, "generation": generation, "cursor": cursor, "next_cursor": end, "count": len(events), "events": events, "pruned_through": floor}
 
     def acknowledge(self, consumer: str, through: int, generation=None, lease=None) -> dict:
         self.validate_consumer(consumer)
@@ -236,6 +241,7 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
             row = db.execute("SELECT cursor,offered FROM consumers WHERE name=?", (consumer,)).fetchone()
             if row is None or through < 0 or through > row[1]:
                 raise ValueError("cannot acknowledge events not delivered to this consumer")
+            retained_guard(db, row[0])
             cursor = max(row[0], through)
             db.execute("UPDATE consumers SET cursor=? WHERE name=?", (cursor, consumer))
             db.execute("UPDATE consumer_meta SET last_ack=? WHERE name=?", (time.time(), consumer))

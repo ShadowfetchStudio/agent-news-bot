@@ -1,0 +1,191 @@
+{
+  "observed_at": "2026-11-27T16:56:59.626968+00:00",
+  "platform": "Linux-7.2.6-76070206-generic-x86_64-with-glibc2.39",
+  "scope": "Synthetic local 200-story / 30-revision ingestion, bounded archive/prune and five further revisions; not a long-running production or slow-disk benchmark",
+  "fixture": "/tmp/anb-retention-load-n4mat8zk",
+  "ingestion_seconds": 9.050026051001623,
+  "backup_seconds": 0.11734045599587262,
+  "prune_seconds": 0.7924929081927985,
+  "before": {
+    "stories": 200,
+    "events": 6000,
+    "database_bytes": 30920704,
+    "reusable_bytes": 0,
+    "wal_bytes": 0,
+    "free_bytes": 572017287168,
+    "consumers": [
+      {
+        "consumer": "fast",
+        "cursor": 6000,
+        "lag": 0
+      },
+      {
+        "consumer": "slow",
+        "cursor": 500,
+        "lag": 5500
+      }
+    ],
+    "retention": {
+      "pruned_through": 0
+    },
+    "automatic_pruning": false
+  },
+  "after": {
+    "stories": 200,
+    "events": 690,
+    "database_bytes": 30920704,
+    "reusable_bytes": 26292224,
+    "wal_bytes": 0,
+    "free_bytes": 571986354176,
+    "consumers": [
+      {
+        "consumer": "fast",
+        "cursor": 6000,
+        "lag": 0
+      },
+      {
+        "consumer": "slow",
+        "cursor": 6000,
+        "lag": 0
+      }
+    ],
+    "retention": {
+      "last_backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+      "last_pruned_at": "2026-11-27T16:56:58.231250+00:00",
+      "pruned_events": 5310,
+      "pruned_through": 5600,
+      "receipts": [
+        {
+          "at": "2026-11-27T16:56:57.560027+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "19601adf-b99a-49f2-bc09-f94d3707daf8",
+          "plan_sha256": "d05bb43ce4b0b466643c194abb09c23a9db490a5689a95a6e83686332b554aa2",
+          "pruned_count": 1000,
+          "pruned_through": 1070
+        },
+        {
+          "at": "2026-11-27T16:56:57.697348+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "5488f40c-0230-4a1c-9275-351730a293d5",
+          "plan_sha256": "0c7c9dc54e0683c7323b03b38c3adc31c432abf5330191980f5fb4f50a992d05",
+          "pruned_count": 1000,
+          "pruned_through": 2120
+        },
+        {
+          "at": "2026-11-27T16:56:57.834314+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "9980f945-28c6-4ce4-b593-9748f6feee2c",
+          "plan_sha256": "27326315656caf14eb36005b8698f5661e088302f2ee6993897906f733a863bc",
+          "pruned_count": 1000,
+          "pruned_through": 3170
+        },
+        {
+          "at": "2026-11-27T16:56:57.974065+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "46ceb79b-cf70-408f-9d00-7102aa704a6a",
+          "plan_sha256": "f498d4c71fd4627aeaacf9940a9c0e4cb75ee4eb18b751b5891398cd7997d954",
+          "pruned_count": 1000,
+          "pruned_through": 4230
+        },
+        {
+          "at": "2026-11-27T16:56:58.110538+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "52679f40-bf36-489f-ac95-c43e4d991235",
+          "plan_sha256": "f64387c69986ef6d218b91b2d3e804e931f6a7e75245d5288f1ad7b0de787e27",
+          "pruned_count": 1000,
+          "pruned_through": 5280
+        },
+        {
+          "at": "2026-11-27T16:56:58.231250+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "4632d2e4-482d-4d0b-ae22-00f5e4944ce4",
+          "plan_sha256": "03fff3147049ffb6cc7d475cb117d3f4a9284e5f7488bcb054a1fc7a915db41b",
+          "pruned_count": 310,
+          "pruned_through": 5600
+        }
+      ]
+    },
+    "automatic_pruning": false
+  },
+  "after_1000_new_events": {
+    "stories": 200,
+    "events": 1690,
+    "database_bytes": 30920704,
+    "reusable_bytes": 21356544,
+    "wal_bytes": 4247752,
+    "free_bytes": 571982102528,
+    "consumers": [
+      {
+        "consumer": "fast",
+        "cursor": 6000,
+        "lag": 1000
+      },
+      {
+        "consumer": "slow",
+        "cursor": 6000,
+        "lag": 1000
+      }
+    ],
+    "retention": {
+      "last_backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+      "last_pruned_at": "2026-11-27T16:56:58.231250+00:00",
+      "pruned_events": 5310,
+      "pruned_through": 5600,
+      "receipts": [
+        {
+          "at": "2026-11-27T16:56:57.560027+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "19601adf-b99a-49f2-bc09-f94d3707daf8",
+          "plan_sha256": "d05bb43ce4b0b466643c194abb09c23a9db490a5689a95a6e83686332b554aa2",
+          "pruned_count": 1000,
+          "pruned_through": 1070
+        },
+        {
+          "at": "2026-11-27T16:56:57.697348+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "5488f40c-0230-4a1c-9275-351730a293d5",
+          "plan_sha256": "0c7c9dc54e0683c7323b03b38c3adc31c432abf5330191980f5fb4f50a992d05",
+          "pruned_count": 1000,
+          "pruned_through": 2120
+        },
+        {
+          "at": "2026-11-27T16:56:57.834314+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "9980f945-28c6-4ce4-b593-9748f6feee2c",
+          "plan_sha256": "27326315656caf14eb36005b8698f5661e088302f2ee6993897906f733a863bc",
+          "pruned_count": 1000,
+          "pruned_through": 3170
+        },
+        {
+          "at": "2026-11-27T16:56:57.974065+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "46ceb79b-cf70-408f-9d00-7102aa704a6a",
+          "plan_sha256": "f498d4c71fd4627aeaacf9940a9c0e4cb75ee4eb18b751b5891398cd7997d954",
+          "pruned_count": 1000,
+          "pruned_through": 4230
+        },
+        {
+          "at": "2026-11-27T16:56:58.110538+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "52679f40-bf36-489f-ac95-c43e4d991235",
+          "plan_sha256": "f64387c69986ef6d218b91b2d3e804e931f6a7e75245d5288f1ad7b0de787e27",
+          "pruned_count": 1000,
+          "pruned_through": 5280
+        },
+        {
+          "at": "2026-11-27T16:56:58.231250+00:00",
+          "backup_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68",
+          "operation_id": "4632d2e4-482d-4d0b-ae22-00f5e4944ce4",
+          "plan_sha256": "03fff3147049ffb6cc7d475cb117d3f4a9284e5f7488bcb054a1fc7a915db41b",
+          "pruned_count": 310,
+          "pruned_through": 5600
+        }
+      ]
+    },
+    "automatic_pruning": false
+  },
+  "pruned_events": 5310,
+  "batches": 6,
+  "protected_history_verified": true,
+  "archive_sha256": "fd6a3374cd1668c7309aa5874380ec9c5c5e15a6cdb69b7c96136f639916bb68"
+}

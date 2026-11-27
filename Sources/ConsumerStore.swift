@@ -33,7 +33,7 @@ extension StoryStore {
                         "last_ack_at": Double(row[4]).map { $0 as Any } ?? NSNull(), "lease_worker": active ? row[5] as Any : NSNull(),
                         "lease_expires_at": active ? until as Any : NSNull(), "lag": Int(row[7]) ?? 0]
             }
-            return ["latest_seq": latest, "consumers": consumers]
+            return ["latest_seq": latest, "retention": try publicRetention(db), "consumers": consumers]
         }
     }
     func consumerChange(_ change: [String: Any]) throws -> [String: Any] {
@@ -56,8 +56,12 @@ extension StoryStore {
                 let cursor: Int
                 switch change["start"] as? String {
                 case "history": cursor = 0
+                case "retained": cursor = try retentionState(db)["pruned_through"] as? Int ?? 0
                 case "now": cursor = Int(try run(db, "SELECT coalesce(max(seq),0) FROM events")[0][0]) ?? 0
                 case "date":
+                    guard (try retentionState(db)["pruned_through"] as? Int ?? 0) == 0 else {
+                        throw ConsumerFailure.conflict("date replay is unavailable after archiving; choose retained or now explicitly")
+                    }
                     guard let value = change["since"] as? String else { throw ConsumerFailure.invalid("since requires an ISO-8601 timestamp with timezone") }
                     let formatter = ISO8601DateFormatter()
                     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -67,8 +71,9 @@ extension StoryStore {
                     let candidate = try run(db, "SELECT min(seq)-1 FROM events WHERE julianday(json_extract(payload,'$.updated_at'))>=julianday(?,'unixepoch')", [String(date.timeIntervalSince1970)])[0][0]
                     if let first = Int(candidate) { cursor = first }
                     else { cursor = Int(try run(db, "SELECT coalesce(max(seq),0) FROM events")[0][0]) ?? 0 }
-                default: throw ConsumerFailure.invalid("start must be history, now or date")
+                default: throw ConsumerFailure.invalid("start must be history, retained, now or date")
                 }
+                _ = try retainedGuard(db, cursor: cursor)
                 gen += 1
                 try run(db, "INSERT OR REPLACE INTO consumers(name,cursor,offered) VALUES (?,?,?)", [name,String(cursor),String(cursor)])
                 try run(db, "UPDATE consumer_meta SET generation=?,last_ack=NULL,lease_token='',lease_worker='',lease_until=0 WHERE name=?", [String(gen),name])

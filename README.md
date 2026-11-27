@@ -149,12 +149,12 @@ current state without event spam. New substantive observations can replace older
 alternate reports remain visible. Multiple desk memberships and disagreement flags aid review.
 See [the story model and migration contract](docs/STORY_MODEL.md) for selection rules and limitations.
 
-Consumer recovery now includes backlog/acknowledgement status, history/date/now starting points, explicit replay and optional worker leases. Event responses carry a generation to fence stale acknowledgements after resets. See [consumer recovery and the idempotent reference worker](docs/CONSUMER_RECOVERY.md) before using these controls with an existing automation.
+Consumer recovery now includes backlog/acknowledgement status, history/date/retained/now starting points, explicit replay and optional worker leases. Event responses carry a generation to fence stale acknowledgements after resets. See [consumer recovery and the idempotent reference worker](docs/CONSUMER_RECOVERY.md) before using these controls with an existing automation.
 
 Source-linked editorial briefs now organize retained reports, corrections, source evidence, unknowns and follow-up questions in the Mac editor, Linux `brief` command and authenticated API. Each research package adds `brief.md` and a structured brief from the same database snapshot. These are attributed research aids, not automated fact-checks or completed scripts. See [editorial briefs](docs/EDITORIAL_BRIEFS.md).
 
 Research backups now have explicit `backup`, `verify-backup` and `restore-research` commands. They preserve the shared Mac/Linux journal and optional caches using SQLite snapshots, verify hashes/integrity and restore only into a new folder. Credentials, configuration, exports and downstream agent state are separate; old consumer checkpoints need reconciliation before reconnecting. The native app includes the same standalone helper (Python 3.10+ required only for recovery). See [research recovery and its limits](docs/RESEARCH_RECOVERY.md).
-Stories and events currently remain until explicitly managed; automated retention is a release task.
+Explicit [history retention](docs/HISTORY_RETENTION.md) previews eligible events, requires a verified archive and preserves unacknowledged events, bookmarked history, the latest two revisions and draft/approval evidence. Agents must explicitly accept the retained suffix after pruning. Storage status reports journal/WAL/reusable bytes; there is no automatic deletion or overall growth cap.
 
 `GET /v1/fresh` returns the **current snapshot** and can return the same items on repeated calls.
 Linux may retain still-fresh items when a desk has no changes. For durable delivery use
@@ -343,7 +343,7 @@ All direct RSS/Hacker News/market/weather/prediction transfers share a **4 MiB d
 ## Screenshots
 
 No screenshots are committed to this repository. The only bundled image is the app icon source at
-`Resources/icon-1024.png` (used by `build.sh` to generate the `.icns`). If you add screenshots,
+`Resources/AppIcon-1024.png`; `build.sh` runs `Resources/draw_icon.swift` and generates the `.icns` from that rendered design. If you add screenshots,
 place them under a top-level `docs/` or `screenshots/` directory and reference them here.
 
 ## Project layout

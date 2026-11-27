@@ -15,10 +15,14 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] in recovery_commands:
         from .recovery import main as recovery_main
         return recovery_main(raw)
+    maintenance_commands = {"storage-status", "retention-plan", "prune-history"}
+    if raw and raw[0] in maintenance_commands:
+        from .maintenance import main as maintenance_main
+        return maintenance_main(raw)
     parser = argparse.ArgumentParser(prog="agent-newsbot")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in sorted(recovery_commands):
-        sub.add_parser(name, help="Research recovery into a new folder; use " + name + " --help")
+    for name in sorted(recovery_commands | maintenance_commands):
+        sub.add_parser(name, help=("Explicit research maintenance; use " if name in maintenance_commands else "Research recovery into a new folder; use ") + name + " --help")
     sub.add_parser("serve", help="Run the localhost API and periodic fetch loop")
     sub.add_parser("fetch", help="Run one fresh fetch and print JSON")
     sub.add_parser("test-worldmonitor", help="Test configured World Monitor access without saving stories (reads one digest)")

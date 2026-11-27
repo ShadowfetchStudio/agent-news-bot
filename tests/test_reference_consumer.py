@@ -82,6 +82,8 @@ def test_administration_is_not_retried_after_ambiguous_failure(monkeypatch):
 
 
 @pytest.mark.parametrize('page', [
+    {'cursor':3,'next_cursor':3,'generation':0,'count':0,'events':[],'pruned_through':4},
+    {'cursor':0,'next_cursor':0,'generation':0,'count':0,'events':[],'pruned_through':True},
     {}, {'cursor':0,'next_cursor':10,'generation':0,'count':0,'events':[]},
     {'cursor':0,'next_cursor':2,'generation':0,'count':1,'events':[{'seq':1,'story':{}}]},
     {'cursor':0,'next_cursor':1,'generation':0,'count':2,'events':[{'seq':1,'story':{}},{'seq':1,'story':{}}]},

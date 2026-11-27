@@ -2,6 +2,7 @@
 from __future__ import annotations
 import secrets
 import time
+from .retention import retained_guard, retention_state, public_retention
 from datetime import datetime
 
 CONSUMER_SCHEMA = """CREATE TABLE IF NOT EXISTS consumer_meta(
@@ -26,12 +27,14 @@ def delivery_guard(db, name, generation=None, lease=None, ack=False):
 class ConsumerMixin:
     def consumer_status(self):
         with self.lock, self.connect() as db:
+            db.execute("BEGIN")
             rows = db.execute("""SELECT c.name,c.cursor,c.offered,coalesce(m.generation,0),m.last_ack,
               coalesce(m.lease_worker,''),coalesce(m.lease_until,0),
               (SELECT count(*) FROM events WHERE seq>c.cursor) FROM consumers c
               LEFT JOIN consumer_meta m ON m.name=c.name ORDER BY c.name""").fetchall()
             latest = db.execute("SELECT coalesce(max(seq),0) FROM events").fetchone()[0]
-        return {"latest_seq": latest, "consumers": [dict(consumer=r[0],cursor=r[1],offered=r[2],generation=r[3],
+            retention = public_retention(db)
+        return {"latest_seq": latest, "retention": retention, "consumers": [dict(consumer=r[0],cursor=r[1],offered=r[2],generation=r[3],
             last_ack_at=r[4],lease_worker=r[5] if r[6]>time.time() else None,
             lease_expires_at=r[6] if r[6]>time.time() else None,lag=r[7]) for r in rows]}
 
@@ -56,8 +59,11 @@ class ConsumerMixin:
                 if until>now: raise ConsumerConflict('release the active lease before reset')
                 mode=change.get('start')
                 if mode=='history': cursor=0
+                elif mode=='retained': cursor=retention_state(db)['pruned_through']
                 elif mode=='now': cursor=db.execute('SELECT coalesce(max(seq),0) FROM events').fetchone()[0]
                 elif mode=='date':
+                    if retention_state(db)['pruned_through'] > 0:
+                        raise ConsumerConflict('date replay is unavailable after archiving; choose retained or now explicitly')
                     value=change.get('since')
                     if not isinstance(value,str): raise ValueError('since requires an ISO-8601 timestamp with timezone')
                     try: date=datetime.fromisoformat(value.replace('Z','+00:00'))
@@ -66,7 +72,8 @@ class ConsumerMixin:
                     # Select the first matching event, then replay the complete suffix. Never filter delivered events.
                     cursor=db.execute("SELECT min(seq)-1 FROM events WHERE julianday(json_extract(payload,'$.updated_at'))>=julianday(?)",(date.isoformat(),)).fetchone()[0]
                     if cursor is None: cursor=db.execute('SELECT coalesce(max(seq),0) FROM events').fetchone()[0]
-                else: raise ValueError('start must be history, now or date')
+                else: raise ValueError('start must be history, retained, now or date')
+                retained_guard(db, cursor)
                 gen+=1
                 db.execute('INSERT OR REPLACE INTO consumers(name,cursor,offered) VALUES (?,?,?)',(name,cursor,cursor))
                 db.execute("UPDATE consumer_meta SET generation=?,last_ack=NULL,lease_token='',lease_worker='',lease_until=0 WHERE name=?",(gen,name))

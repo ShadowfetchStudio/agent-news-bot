@@ -78,6 +78,9 @@ def validate_page(page, limit):
     if not isinstance(page, dict): raise RuntimeError('Invalid event page')
     for key in ('cursor', 'next_cursor', 'generation', 'count'):
         if type(page.get(key)) is not int or page[key] < 0: raise RuntimeError('Invalid event page counters')
+    floor = page.get('pruned_through', 0)
+    if type(floor) is not int or not 0 <= floor <= page['cursor']:
+        raise RuntimeError('Event page crosses the retained-history boundary')
     events = page.get('events')
     if not isinstance(events, list) or page['count'] != len(events) or len(events) > limit:
         raise RuntimeError('Invalid event page length')
@@ -104,7 +107,7 @@ def main():
     parser.add_argument('--token-file',required=True)
     parser.add_argument('--consumer',required=True)
     parser.add_argument('--inbox',required=True)
-    parser.add_argument('--start',choices=['history','now'],default='history',help='Only used when creating a new consumer')
+    parser.add_argument('--start',choices=['history','retained','now'],default='history',help='Only used when creating a new consumer')
     parser.add_argument('--follow',action='store_true')
     args=parser.parse_args()
     token_path=Path(args.token_file)
@@ -112,7 +115,9 @@ def main():
     token=token_path.read_text().strip()
     if not token: raise ValueError('empty token file')
     client=Client(args.base,token)
-    check_capabilities(client)
+    capabilities = check_capabilities(client)
+    if args.start == 'retained' and capabilities['features'].get('retained_history') != 1:
+        raise RuntimeError('Bridge lacks compatible retained-history onboarding')
     rows=client.call('GET','/v1/consumers')['consumers']
     current=next((r for r in rows if r['consumer']==args.consumer),None)
     if current is None:

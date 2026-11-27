@@ -4,7 +4,7 @@ Agent delivery is **at least once**, in journal sequence order. Consumers must c
 
 ## Observe and choose a starting point
 
-Authenticated `GET /v1/consumers` returns `latest_seq` and a `consumers` array. Each row includes name (`consumer`), acknowledged `cursor`, highest `offered` sequence, `generation`, pending-event count (`lag`), Unix-seconds `last_ack_at` or null, and the active lease worker/expiry or null. Status does not expose lease tokens or change cursors. Null acknowledgement time means no acknowledgement was recorded since metadata tracking began or since the last reset; it does not invent historical timestamps.
+Authenticated `GET /v1/consumers` returns `latest_seq`, `retention` and a `consumers` array. Each row includes name (`consumer`), acknowledged `cursor`, highest `offered` sequence, `generation`, pending-event count (`lag`), Unix-seconds `last_ack_at` or null, and the active lease worker/expiry or null. Status does not expose lease tokens or change cursors. Null acknowledgement time means no acknowledgement was recorded since metadata tracking began or since the last reset; it does not invent historical timestamps.
 
 Authenticated `POST /v1/consumers` accepts a bounded JSON object (Content-Length, at most 64 KiB), using one of these actions:
 
@@ -14,11 +14,14 @@ Authenticated `POST /v1/consumers` accepts a bounded JSON object (Content-Length
 
 `start` options:
 
-- `history`: start before all retained events.
+- `history`: start before all events; rejected after history has been pruned.
+- `retained`: explicitly accept the complete suffix after `retention.pruned_through`; protected older events may still exist outside this delivery suffix.
 - `now`: start after the current latest sequence, atomically with creation/reset.
 - `date`: supply `since`, an ISO-8601 timestamp with timezone. Start just before the first event recorded at or after that time, then deliver the entire remaining sequence. This uses the event's recorded `updated_at`, not the publisher's publication date. Later entries with earlier timestamps still appear: delivery is never filtered into gaps.
 
-Creating an existing name returns 409. A legacy consumer first created by `GET /v1/events?consumer=NAME` keeps its previous full-history behavior and generation zero. Explicit creation uses generation one. Use a separate name for every independent workflow.
+After pruning, date replay is also rejected rather than silently skipping archived events. See [retention boundaries and archival recovery](HISTORY_RETENTION.md).
+
+Creating an existing name returns 409. A legacy consumer first created by `GET /v1/events?consumer=NAME` keeps its previous full-history behavior and generation zero only before pruning; afterward implicit history creation returns 409. Explicit creation uses generation one. Use a separate name for every independent workflow.
 
 ## Replay or skip deliberately
 
@@ -28,9 +31,9 @@ Read status, stop your worker and then submit the observed generation:
 {"consumer":"daily-brief","action":"reset","start":"history","expected_generation":1}
 ```
 
-Reset can use history, date or now. History/date replay work; now intentionally skips the current backlog. A reset increments `generation`, clears the previous offered range and resets the acknowledgement timestamp. It never deletes stories, events, drafts or another consumer's position. An active lease must be released or expire first. A stale expected generation returns 409 without mutation.
+Reset can use history, retained, date or now. History/date require an unpruned journal; retained deliberately starts at the archival boundary; now intentionally skips the current backlog. A reset increments `generation`, clears the previous offered range and resets the acknowledgement timestamp. It never deletes stories, events, drafts or another consumer's position. An active lease must be released or expire first. A stale expected generation returns 409 without mutation.
 
-Every event response includes `generation`. Acknowledge only a range whose complete work has been committed:
+Every event response includes `generation` and `pruned_through`. Acknowledge only a range whose complete work has been committed:
 
 ```text
 POST /v1/events/ack?consumer=daily-brief&through=123&generation=2
@@ -78,7 +81,7 @@ python examples/reliable_consumer.py \
 
 The example's complete side effect is an atomic inbox transaction keyed by `(consumer, seq)`. A crash after commit and before acknowledgement safely replays the same keys. An inbox write error prevents acknowledgement. A reused sequence with different content stops processing rather than overwriting evidence. Use a separate inbox when connecting to a different or replaced server journal.
 
-`--start history` is the default for a new name; `--start now` only affects creation. Existing names are never automatically reset. Administrative conflicts stop the example. If a lease-acquisition response is lost, the example stops instead of automatically retrying administration. Inspect status and wait for the short lease to expire rather than forcing a reset. This is safe but not transparent recovery of a lost lease token.
+`--start history` is the default for a new name; `--start retained` and `--start now` only affect creation. Existing names are never automatically reset. Administrative conflicts stop the example. If a lease-acquisition response is lost, the example stops instead of automatically retrying administration. Inspect status and wait for the short lease to expire rather than forcing a reset. This is safe but not transparent recovery of a lost lease token.
 
 For real publishing or remote work, replace the SQLite sink only with an operation that accepts an idempotency key or a durable transactional outbox. A successful HTTP send followed by a crash can otherwise duplicate an external action. Acknowledgement is not proof of editorial or licensing approval.
 
