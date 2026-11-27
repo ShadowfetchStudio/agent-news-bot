@@ -151,6 +151,11 @@ struct Article: Identifiable, Hashable, Codable {
         return values.isEmpty ? [desk] : values
     }
 
+    var displayDesks: [Desk] {
+        guard let values = wire["display_desks"] as? [String] else { return desks }
+        return values.compactMap(Desk.init(rawValue:))
+    }
+
     var host: String {
         URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") ?? ""
     }

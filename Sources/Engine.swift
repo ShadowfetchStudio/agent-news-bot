@@ -8,6 +8,12 @@ private final class LockedSnapshot: @unchecked Sendable {
     private var desks: [DeskResult] = []
     private var fetchedAt: String?
     private var fetching = false
+    private var persistenceError: String?
+
+    func setPersistenceError(_ value: String?) {
+        lock.lock(); defer { lock.unlock() }
+        persistenceError = value
+    }
 
     func update(articles: [Article], desks: [DeskResult], fetchedAt: String?) {
         lock.lock()
@@ -38,7 +44,7 @@ private final class LockedSnapshot: @unchecked Sendable {
     func readStatus() -> BridgeStatusSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        return BridgeStatusSnapshot(fresh: articles.filter { $0.wire["carried"] as? Bool != true }.count, fetchedAt: fetchedAt, fetching: fetching)
+        return BridgeStatusSnapshot(fresh: articles.filter { $0.wire["carried"] as? Bool != true }.count, fetchedAt: fetchedAt, fetching: fetching, persistenceError: persistenceError)
     }
 }
 
@@ -54,6 +60,7 @@ final class NewsEngine: ObservableObject {
     @Published var status = "Ready. Fetch Fresh finds new stories and updates inside the lookback window."
     @Published var report: FetchReport?
     @Published var coverageState = "unknown"
+    @Published private(set) var snapshotError = ""
     @Published var hermes = AgentStatus(kind: .hermes, label: "Hermes", detail: "Checking…", ready: false)
     @Published var openclaw = AgentStatus(kind: .openclaw, label: "OpenClaw", detail: "Checking…", ready: false)
     @Published var bridgeReady = false
@@ -73,7 +80,7 @@ final class NewsEngine: ObservableObject {
     var filtered: [Article] {
         var items = articles
         if let desk = selectedDesk {
-            items = items.filter { $0.desks.contains(desk) }
+            items = items.filter { $0.displayDesks.contains(desk) }
         }
         let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !q.isEmpty {
@@ -232,8 +239,7 @@ final class NewsEngine: ObservableObject {
         merged = SnapshotPolicy.merge(previous: articles, fresh: merged,
             previousFetchedAt: snapshot.readStatus().fetchedAt.flatMap(DateStamp.parse), lookback: lookback,
             enabled: enabled, limit: maxItems)
-        for i in results.indices { results[i].articles = merged.filter { $0.desks.contains(results[i].desk) } }
-        merged.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        for i in results.indices { results[i].articles = merged.filter { $0.displayDesks.contains(results[i].desk) } }
         store.pruneSeen(olderThanDays: 30)
 
         let finished = Date()
@@ -246,8 +252,8 @@ final class NewsEngine: ObservableObject {
 
         let scanned = results.reduce(0) { $0 + $1.articles.count + $1.skippedOld + $1.skippedDup }
         report = FetchReport(started: started, finished: finished, freshCount: changedCount, scanned: scanned, desks: results)
-        exportJSON(fetchedAt: fetchedAtISO)
-        completedFetches += 1
+        let saved = persistSnapshot(fetchedAt: fetchedAtISO)
+        if saved { completedFetches += 1 }
         let errors = results.flatMap(\.sourceErrors).count
         let coverageLabel = "Coverage: " + coverageState + " · "
         if changedCount == 0 {
@@ -258,6 +264,7 @@ final class NewsEngine: ObservableObject {
             status = "\(changedCount) new or updated stories · \(errors) source warnings"
         }
         status = coverageLabel + status
+        if !saved { status += " · Snapshot not saved; see storage warning." }
         isFetching = false
         snapshot.setFetching(false)
     }
@@ -310,7 +317,25 @@ final class NewsEngine: ObservableObject {
         NSWorkspace.shared.open(AppPaths.exports)
     }
 
-    private func exportJSON(fetchedAt: String) {
+    func retrySnapshotSave() {
+        guard !isFetching, let fetchedAt = snapshot.readStatus().fetchedAt else { return }
+        if persistSnapshot(fetchedAt: fetchedAt) { status = "Current snapshot saved. No sources were fetched again." }
+    }
+
+    @discardableResult
+    private func persistSnapshot(fetchedAt: String) -> Bool {
+        do {
+            try exportJSON(fetchedAt: fetchedAt)
+            snapshotError = ""; snapshot.setPersistenceError(nil)
+            return true
+        } catch {
+            snapshotError = "Snapshot not saved: \(error.localizedDescription) The preceding snapshot and story journal are preserved. Check \(AppPaths.exports.path), then Retry save."
+            snapshot.setPersistenceError(snapshotError)
+            return false
+        }
+    }
+
+    private func exportJSON(fetchedAt: String) throws {
         let payload: [String: Any] = [
             "fetched_at": fetchedAt,
             "total_articles": articles.count,
@@ -319,17 +344,11 @@ final class NewsEngine: ObservableObject {
             "articles": articles.map(\.wire),
             "lookback_hours": settings.lookbackHours,
             "categories": Dictionary(uniqueKeysWithValues: Desk.allCases.map { desk in
-                (desk.title, articles.filter { $0.desks.contains(desk) }.map(\.wire))
+                (desk.title, articles.filter { $0.displayDesks.contains(desk) }.map(\.wire))
             })
         ]
-        let name = "agentnewsbot_\(Int(Date().timeIntervalSince1970)).json"
-        let url = AppPaths.exports.appendingPathComponent(name)
-        let latestURL = AppPaths.exports.appendingPathComponent("latest.json")
-        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: url, options: .atomic)
-            try? data.write(to: latestURL, options: .atomic)
-            pruneOldExports(keep: 50)
-        }
+        try SnapshotWriter.save(payload, in: AppPaths.exports)
+        pruneOldExports(keep: 50)
     }
 
     private func pruneOldExports(keep: Int) {

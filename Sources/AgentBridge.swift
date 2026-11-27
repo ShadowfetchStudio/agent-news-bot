@@ -5,6 +5,7 @@ struct BridgeStatusSnapshot: Sendable {
     var fresh: Int
     var fetchedAt: String?
     var fetching: Bool
+    var persistenceError: String? = nil
 }
 
 final class AgentBridge: @unchecked Sendable {
@@ -221,7 +222,7 @@ final class AgentBridge: @unchecked Sendable {
             } else {
                 var items = articlesProvider()
                 if let desk = queryItems.first(where: { $0.name == "desk" })?.value, !desk.isEmpty {
-                    items = items.filter { $0.desks.contains { $0.rawValue == desk } }
+                    items = items.filter { $0.displayDesks.contains { $0.rawValue == desk } }
                 }
                 if let rawLimit = queryItems.first(where: { $0.name == "limit" })?.value, !rawLimit.isEmpty {
                     guard let parsed = Int(rawLimit), parsed >= 0 else {
@@ -265,6 +266,7 @@ final class AgentBridge: @unchecked Sendable {
                 ]
                 payload["displayed"] = articlesProvider().count
                 payload["fetched_at"] = st.fetchedAt ?? NSNull()
+                payload["snapshot_error"] = st.persistenceError ?? NSNull()
                 payload["coverage"] = Coverage.summary(desksProvider().flatMap(\.coverageChecks))
                 let currentJob = jobLock.withLock { job }
                 payload["fetch_job"] = currentJob

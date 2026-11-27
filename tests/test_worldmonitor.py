@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -1036,6 +1036,59 @@ def test_native_new_story_does_not_erase_other_current_stories(swift_harness, tm
     assert sum(not a["carried"] for a in rows) == 2
 
 
+@pytest.mark.parametrize('runtime', ['python', 'swift'])
+@pytest.mark.parametrize('limit', [0, 1, 20])
+def test_independent_desk_caps_preserve_shared_membership(runtime, limit, request, monkeypatch, tmp_path):
+    from datetime import timedelta
+    # A busy desk fills first, but shared and quiet-desk stories still get their
+    # own display allocation. Full source membership remains unchanged.
+    fresh = []
+    for n in range(25):
+        fresh.append(dict(article(f'https://example.com/science/{n}'),
+                          id=f'a{n:02}', published=(NOW-timedelta(minutes=n)).isoformat(), desks=['science']))
+    shared = dict(article('https://example.com/shared'), id='shared',
+                  published=(NOW-timedelta(minutes=30)).isoformat(), desks=['science', 'tech'])
+    quiet = dict(article('https://example.com/tech'), id='tech', desk='tech', desks=['tech'],
+                 published=(NOW-timedelta(minutes=31)).isoformat())
+    old = [shared, quiet] + [dict(a, id='old'+a['id'], published=(NOW-timedelta(hours=1)).isoformat()) for a in fresh]
+    original = copy.deepcopy(old + fresh)
+    if runtime == 'swift':
+        binary = request.getfixturevalue('swift_harness')
+        path = tmp_path/'desk-batch.json'
+        def merge(previous, fresh):
+            path.write_text(json.dumps(dict(previous=previous, fresh=fresh, limit=limit)))
+            return swift(binary, 'snapshot-merge', path)['articles']
+    else:
+        monkeypatch.setattr(server, 'MAX_PER_DESK', limit)
+        monkeypatch.setattr(server, 'HOME', tmp_path)
+        monkeypatch.setattr(server, 'SHARED', tmp_path/'shared')
+        class FixedDate(datetime):
+            @classmethod
+            def now(cls, tz=None): return NOW
+        monkeypatch.setattr(server, 'datetime', FixedDate)
+        state = server.NewsState()
+        def merge(previous, fresh):
+            result = state._keep_live_desks({'articles': previous},
+                {'articles': fresh, 'desks': [{'desk': 'science'}, {'desk': 'tech'}]})
+            for desk in result['desks']:
+                assert desk['displayed'] <= limit
+                assert desk['new'] + desk['updated'] + desk['carried'] == desk['displayed']
+            assert all(len(items) <= limit for items in result['categories'].values())
+            return result['articles']
+    rows = merge(old, fresh)
+    assert old + fresh == original
+    assert len({a['id'] for a in rows}) == len(rows)
+    assert sum('science' in a['display_desks'] for a in rows) == min(limit, 25)
+    assert sum('tech' in a['display_desks'] for a in rows) == min(limit, 2)
+    if limit:
+        shared_row = next(a for a in rows if a['id']=='shared')
+        assert shared_row['desks'] == ['science', 'tech']
+        assert shared_row['display_desks'] == ['tech']
+    # Equal-date ordering and display allocations remain stable after restoration.
+    restored = merge(list(reversed(rows)), [])
+    assert [(a['id'], a['display_desks']) for a in restored] == [(a['id'], a['display_desks']) for a in rows]
+
+
 def test_native_isolated_app_paths_and_credentials(swift_harness, tmp_path):
     env = dict(os.environ, AGENT_NEWSBOT_HOME=str(tmp_path / "isolated"))
     first = json.loads(subprocess.check_output([str(swift_harness), "paths"], env=env))
@@ -1361,3 +1414,39 @@ def test_token_creation_is_atomic_private_and_does_not_replace_invalid_file(tmp_
     state.token_path.write_text('bad')
     with pytest.raises(ValueError,match='invalid bridge token'): state._load_or_create_token()
     assert state.token_path.read_text()=='bad'
+
+
+def test_native_snapshot_atomic_failure_preservation_and_retry(swift_harness, tmp_path):
+    destination = tmp_path/'exports'; destination.mkdir()
+    latest = destination/'latest.json'
+    latest.write_text('{"original": true}')
+    original = latest.read_bytes()
+    for mode in ['full', 'large']:
+        result = swift(swift_harness, 'snapshot-save', destination, mode)
+        assert 'error' in result
+        assert latest.read_bytes() == original
+        assert sorted(p.name for p in destination.iterdir()) == ['latest.json']
+    first = swift(swift_harness, 'snapshot-save', destination, 'retry')
+    assert json.loads(latest.read_text()) == {'value': 'retry'}
+    archive = Path(first['archive'])
+    assert archive.read_bytes() == latest.read_bytes()
+    assert archive.stat().st_mode & 0o777 == 0o600
+    assert latest.stat().st_mode & 0o777 == 0o600
+    second = swift(swift_harness, 'snapshot-save', destination, 'next')
+    assert first['archive'] != second['archive']
+    assert json.loads(archive.read_text()) == {'value': 'retry'}
+    assert not list(destination.glob('.snapshot-*'))
+
+
+@pytest.mark.parametrize('kind', ['directory', 'symlink'])
+def test_native_snapshot_invalid_destination_preserved(swift_harness, tmp_path, kind):
+    destination = tmp_path/'exports'; destination.mkdir()
+    latest = destination/'latest.json'
+    sentinel = tmp_path/'sentinel'; sentinel.write_text('preserve me')
+    if kind == 'directory': latest.mkdir()
+    else: latest.symlink_to(sentinel)
+    result = swift(swift_harness, 'snapshot-save', destination)
+    assert 'error' in result
+    assert sentinel.read_text() == 'preserve me'
+    assert latest.is_dir() if kind == 'directory' else latest.is_symlink()
+    assert len(list(destination.iterdir())) == 1

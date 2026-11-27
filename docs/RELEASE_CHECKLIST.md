@@ -10,11 +10,11 @@ The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found n
 - [ ] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
 - [ ] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
 - [x] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
-- [ ] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
-- [ ] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
-- [ ] R07: return a controlled unauthorized response for malformed/non-ASCII credentials.
+- [x] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
+- [x] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
+- [x] R07: return a controlled unauthorized response for malformed/non-ASCII credentials.
 - [ ] R08: enforce byte and total-time limits while receiving every provider response, not after buffering.
-- [ ] R09: surface native snapshot/export persistence failures without losing the preceding valid snapshot.
+- [x] R09: surface native snapshot/export persistence failures without losing the preceding valid snapshot.
 
 Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS suite 80 passed/47 Mac-only skips; Apple Silicon build and strict ad-hoc signature verification passed. New isolated fixtures reproduce R01–R08 (R04's desktop dispatch is code-confirmed, not executed; R08 total-time risk is code-confirmed). R09 is code-confirmed. The live 54-feed sweep returned 48 feeds with parseable entries, five request/HTTP failures and one valid empty feed. This remains a development checkout, not the final published release.
 
@@ -169,3 +169,15 @@ Native Linux regression result for this batch: **77 passed / 47 native-Mac skips
 Final token regression: concurrent creators publish one complete private token without overwriting another creator; invalid existing bytes remain unchanged and fail visibly. Targeted Mac/Linux tests passed.
 
 Final installer acceptance also checks the process command line uses the selected current interpreter and rejects Python path/home overrides that could load another runtime. The native smoke sequence passed with this check. A focused regression verifies that a late CLI-write failure restores the previously disabled service state as well as the old release. Native root-system execution and vulnerability/constraint work remain explicitly unclaimed.
+
+
+## Follow-up reliability repair batch
+
+- R05: independent per-desk selection after fresh/retained merging, with deterministic date/ID order. Display-only `display_desks` keeps full source membership intact while preventing shared stories from overflowing a full desk. Sidebar, current API filters, categories and restored counts use the same selection. History/events are unaffected.
+- R06/R07: Linux production listener limits active workers to 16, rejects overflow with 503/Retry-After, enforces absolute header and request deadlines, and bounds stalled reads/writes. Non-ASCII authentication headers return 401. Real-socket tests cover idle headers, trickled headers/bodies, stalled readers, capacity recovery and shutdown. A socket deadline does not roll back a mutation already executing.
+- R09: native private snapshot writer validates the 16 MiB limit, writes/fsyncs complete staging bytes, publishes a unique archive and atomically replaces latest. Failed commits preserve the preceding snapshot and clean the newly created archive/staging file. A persistent warning and Retry save control accompany the API's `snapshot_error`; failed bridge refresh jobs stay failed even if a later save retry succeeds. Archive pruning remains best-effort; power-loss durability is not claimed.
+- Native filesystem fixtures exercise simulated ENOSPC, oversized payloads, directory/symlink destinations, private permissions, unique successive exports and retry preservation.
+- Actual isolated Mac app walkthrough: disabled provider desks and agent CLI use; forced EACCES on only the temporary export directory; HTTP fetch job failed, API exposed snapshot_error and previous bytes were preserved. Inspected the visible warning and Retry save button at 1100 x 752. Restored directory access, clicked Retry save, observed the success message and warning removal, verified the saved 0600 JSON and cleared API error while preserving the original failed job. Stopped the test app and removed only its isolated preferences afterward. Evidence retained in `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-snapshot-ui-jclap3fc/`.
+- Validation: full macOS suite **174 passed**; isolated native Pop!_OS suite **107 passed / 67 native-Mac skips**. Apple Silicon build completed without warnings and passed strict ad-hoc signature verification. This targeted UI check does not close the full keyboard/VoiceOver/installer acceptance items.
+
+R02, the manual repair portion of R03, and direct-provider bounds in R08 remain open, along with the wider setup, maintenance, real integrations and final distribution checklist. No final release assets have been published.

@@ -27,8 +27,19 @@ enum SnapshotPolicy {
             let right = $1.published ?? DateStamp.parse($1.wire["first_seen"] as? String ?? "") ?? .distantPast
             return left == right ? $0.id < $1.id : left > right
         }
-        // A bounded display window. Full history remains in the journal.
-        return Array(retained.prefix(max(0, limit) * enabled.count))
+        // Allocate each desk independently. Preserve full journal membership even
+        // when a shared story only fits in one desk's remaining display slots.
+        var counts: [Desk: Int] = [:]
+        return retained.compactMap { article in
+            let display = Set(article.desks).filter { enabled.contains($0) && counts[$0, default: 0] < max(0, limit) }
+                .sorted { $0.rawValue < $1.rawValue }
+            guard !display.isEmpty else { return nil }
+            var wire = article.wire
+            wire["display_desks"] = display.map(\.rawValue)
+            guard let row = try? Article.fromWire(wire) else { return nil }
+            for desk in display { counts[desk, default: 0] += 1 }
+            return row
+        }
     }
 
     static func restore(_ payload: [String: Any], lookback: Double, enabled: Set<Desk>, limit: Int, now: Date = Date()) -> (articles: [Article], desks: [DeskResult], fetchedAt: String?) {
@@ -46,7 +57,7 @@ enum SnapshotPolicy {
                     detail: "Restored snapshot; not checked in this session. " + (source["detail"] as? String ?? ""),
                     checkedAt: source["checked_at"] as? String ?? fetchedAt ?? "")
             }
-            desks.append(DeskResult(desk: desk, articles: articles.filter { $0.desks.contains(desk) }, skippedOld: 0, skippedDup: 0,
+            desks.append(DeskResult(desk: desk, articles: articles.filter { $0.displayDesks.contains(desk) }, skippedOld: 0, skippedDup: 0,
                 sourceErrors: raw["errors"] as? [String] ?? [], sourceChecks: checks))
         }
         return (articles, desks, fetchedAt)

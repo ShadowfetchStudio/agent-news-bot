@@ -119,7 +119,7 @@ flowchart TD
 
 **Linux implementation (`linux/agent_newsbot/`, Python 3, stdlib + `feedparser` + `requests`):**
 
-- `server.py` — `ThreadingHTTPServer` on `127.0.0.1`, bearer-token auth, background fetch loop,
+- `server.py` / `bounded_http.py` — bounded threaded HTTP on `127.0.0.1`, bearer-token auth, background fetch loop,
   atomic `latest.json` writes.
 - `engine.py` — the concurrent fetchers (`ThreadPoolExecutor`), one per desk family.
 - `store.py` — the SQLite freshness ledger (`seen` + `quotes` tables), URL canonicalization, date
@@ -161,6 +161,28 @@ Base URL: `http://127.0.0.1:18765` (port configurable). All endpoints except `/h
 bearer token in either an `Authorization: Bearer <token>` header **or** an `X-Agent-Token: <token>`
 header (verified with constant-time comparison). The server binds to loopback only and returns `401`
 without a valid token or `405` on disallowed HTTP methods.
+
+The Linux listener accepts at most 16 active clients. Excess connections receive `503`
+with `Retry-After: 1`. Headers have a five-second absolute deadline; after headers,
+the request/body/response has a 15-second deadline and individual socket operations have
+a five-second timeout. A client sending occasional bytes cannot renew the absolute deadline.
+Each connection handles one request. Socket expiry interrupts transport, but does not undo
+a database operation already in progress; retry mutations using their existing concurrency
+or idempotency safeguards. Malformed/non-ASCII credentials return `401`.
+
+The live display selects the newest configured number of stories **independently per desk**,
+including retained stories, with stable ID ordering for equal timestamps. `display_desks`
+records where a story currently fits; `desks` retains its complete source membership.
+Desk filters, categories and displayed counts use `display_desks`. The All view includes each
+selected story once. Omitted stories and their events remain in the persistent library.
+
+On macOS, failed snapshot saves leave the preceding `latest.json` intact and show a persistent
+storage warning with **Retry save**. Retry saves the current in-memory batch without refetching.
+`GET /v1/status` exposes `snapshot_error` (null when no save error is recorded). A bridge-triggered
+refresh that cannot save ends as failed even though its source observations may already be in
+the journal and visible in memory. Retrying the save does not rewrite that earlier job's outcome.
+Snapshots are limited to 16 MiB, use private 0600 files, and are atomically replaced; this is not
+a claim of power-loss durability. Archive cleanup remains best-effort after a successful save.
 
 | Method & path | Auth | Description |
 |---------------|------|-------------|

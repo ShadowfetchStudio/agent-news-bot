@@ -11,7 +11,7 @@ import uuid
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from .config import FETCH_INTERVAL, HOME, LOOKBACK_HOURS, PORT, SHARED, MAX_PER_DESK, ALL_DESKS
@@ -22,6 +22,7 @@ from .stories import StoryStore
 from .library import LibraryConflict
 from .consumers import ConsumerConflict
 from .url_safety import safe_article_url
+from .bounded_http import BoundedHTTPServer, DeadlineHandlerMixin
 
 log = logging.getLogger("agent_newsbot")
 
@@ -185,19 +186,31 @@ class NewsState:
                     carried["first_seen"] = self._story_time(item, previous.get("fetched_at")).isoformat()
                 kept.append(carried)
                 seen.add(item["id"])
+        # Stable ID breaks equal-date ties identically to the native app.
+        kept.sort(key=lambda item: item['id'])
         kept.sort(key=lambda item: self._story_time(item, snapshot.get("fetched_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-        kept = kept[:max(0, MAX_PER_DESK) * len(enabled)]
+        selected = []
+        counts = dict.fromkeys(enabled, 0)
+        for item in kept:
+            display = sorted(desk for desk in set(item.get('desks', [item.get('desk')]))
+                             if desk in enabled and counts[desk] < max(0, MAX_PER_DESK))
+            if not display:
+                continue
+            item['display_desks'] = display
+            selected.append(item)
+            for desk in display:
+                counts[desk] += 1
+        kept = selected
         snapshot["articles"] = kept
         snapshot["total_articles"] = len(kept)
         categories: dict[str, list] = {}
         for item in kept:
-            title = item.get("category") or item.get("desk")
-            for desk_name in item.get("desks", [item.get("desk")]):
+            for desk_name in item['display_desks']:
                 from .config import DESK_TITLES
                 categories.setdefault(DESK_TITLES.get(desk_name, desk_name), []).append(item)
         snapshot["categories"] = categories
         for desk in snapshot.get("desks") or []:
-            items = [item for item in kept if desk["desk"] in item.get("desks", [item.get("desk")])]
+            items = [item for item in kept if desk["desk"] in item['display_desks']]
             carried = sum(bool(item.get("carried")) for item in items)
             updated = sum(not item.get("carried") and item.get("change") in ("updated", "enriched", "corrected") for item in items)
             fresh = len(items) - carried
@@ -209,7 +222,7 @@ class NewsState:
 STATE = NewsState()
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
     server_version = "AgentNewsBot/1.0"
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
@@ -227,14 +240,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:
             pass
 
     def _authorized(self) -> bool:
         auth = self.headers.get("Authorization", "")
         alt = self.headers.get("X-Agent-Token", "")
         expected_bearer = f"Bearer {STATE.token}"
-        return hmac.compare_digest(auth, expected_bearer) or hmac.compare_digest(alt, STATE.token)
+        # HTTP headers are decoded as Latin-1. compare_digest(str, str) raises
+        # on non-ASCII input; bytes comparisons safely return a mismatch instead.
+        return hmac.compare_digest(auth.encode('utf-8'), expected_bearer.encode('utf-8')) or hmac.compare_digest(alt.encode('utf-8'), STATE.token.encode('utf-8'))
 
     def _library(self, method, parsed):
         paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/consumers"}
@@ -320,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
                 articles = list(STATE.snapshot.get("articles") or [])
             desk = (qs.get("desk") or [None])[0]
             if desk:
-                articles = [a for a in articles if desk in a.get("desks", [a.get("desk")])]
+                articles = [a for a in articles if desk in a.get("display_desks", a.get("desks", [a.get("desk")]))]
             raw_limit = (qs.get("limit") or ["100"])[0]
             try:
                 limit = int(raw_limit)
@@ -417,7 +432,7 @@ def loop_fetch() -> None:
 
 def serve() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    httpd = BoundedHTTPServer(("127.0.0.1", PORT), Handler)
     threading.Thread(target=loop_fetch, daemon=True, name="fetch-loop").start()
     log.info("Agent News Bot listening on http://127.0.0.1:%s", PORT)
     httpd.serve_forever()

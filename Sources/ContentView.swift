@@ -32,7 +32,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 ForEach(Desk.allCases) { desk in
                     if engine.settings.enabledDesks.contains(desk) {
-                        let count = engine.articles.filter { $0.desks.contains(desk) }.count
+                        let count = engine.articles.filter { $0.displayDesks.contains(desk) }.count
                         NavigationLink(value: desk) {
                             Label {
                                 HStack {
@@ -79,6 +79,13 @@ struct ContentView: View {
                     .lineLimit(2)
             }
             .padding(12)
+            if !engine.snapshotError.isEmpty {
+                HStack(alignment: .top) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
+                    Text(engine.snapshotError).font(.caption).textSelection(.enabled)
+                    Button("Retry save") { engine.retrySnapshotSave() }.disabled(engine.isFetching)
+                }.padding(12)
+            }
             Divider()
             if engine.isFetching {
                 ProgressView("Fetching stories and revisions…")

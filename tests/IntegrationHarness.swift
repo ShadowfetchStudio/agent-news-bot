@@ -4,6 +4,19 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "snapshot-save" {
+            do {
+                let directory = URL(fileURLWithPath: args[2])
+                let mode = args.count > 3 ? args[3] : "ok"
+                let value: [String: Any] = mode == "large" ? ["data": String(repeating: "x", count: 16 * 1024 * 1024)] : ["value": mode]
+                let archive = try SnapshotWriter.save(value, in: directory, commit: { source, destination in
+                    if mode == "full" { throw SnapshotWriter.Failure.io(ENOSPC) }
+                    try SnapshotWriter.replace(source, destination)
+                })
+                try output(["archive": archive.path])
+            } catch { try output(["error": error.localizedDescription]) }
+            return
+        }
         if args[1] == "safe-urls" {
             let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String]
             try output(["safe": rows.map { ArticleURL.validated($0) != nil }]); return
@@ -64,7 +77,7 @@ import Security
             let old = try (value["previous"] as! [[String: Any]]).map { try Article.fromWire($0) }
             let fresh = try (value["fresh"] as! [[String: Any]]).map { try Article.fromWire($0) }
             try output(["articles": SnapshotPolicy.merge(previous: old, fresh: fresh, previousFetchedAt: nil, lookback: 12,
-                enabled: [.science, .tech], limit: 20, now: Date(timeIntervalSince1970: 1795780800)).map(\.wire)]); return
+                enabled: [.science, .tech], limit: value["limit"] as? Int ?? 20, now: Date(timeIntervalSince1970: 1795780800)).map(\.wire)]); return
         }
         if args[1] == "paths" {
             try output(["support": AppPaths.support.path, "bundle": AppPaths.bundleId]); return
