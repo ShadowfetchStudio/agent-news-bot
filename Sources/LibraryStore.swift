@@ -136,8 +136,12 @@ extension StoryStore {
                 }
                 guard let drafts = value as? [String: String], Set(drafts.keys) == Set(LibraryModel.fields.keys),
                       drafts.allSatisfy({ $0.value.unicodeScalars.count <= LibraryModel.fields[$0.key]! }) else { throw LibraryFailure.invalid("all five bounded draft fields are required") }
-                if let post = drafts["x_post"], !post.isEmpty,
-                   try XText.request(["op": "measure", "text": post])["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
+                if let post = drafts["x_post"], !post.isEmpty {
+                    let measured: [String: Any]
+                    do { measured = try XText.request(["op": "measure", "text": post]) }
+                    catch { throw LibraryFailure.invalid("X draft validation unavailable or over 280 weighted characters") }
+                    if measured["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
+                }
                 for (name, fields) in LibraryModel.platforms {
                     if change["generate"] as? Bool == true || fields.contains(where: { drafts[$0] != (previousDrafts[$0] ?? "") }) {
                         platforms[name] = ["status": "draft", "approved_revision": NSNull()]
@@ -166,7 +170,12 @@ extension StoryStore {
                         do { try ArticleURL.requireSafeStory(story) } catch { throw LibraryFailure.invalid("Saved story contains an invalid source link; approval is disabled.") }
                         let drafts = state["drafts"] as? [String: String] ?? [:]
                         guard LibraryModel.platforms[name]!.allSatisfy({ !(drafts[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { throw LibraryFailure.invalid("complete this platform's draft before approval") }
-                        if name == "x", try XText.request(["op": "measure", "text": drafts["x_post"] ?? ""])["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
+                        if name == "x" {
+                            let measured: [String: Any]
+                            do { measured = try XText.request(["op": "measure", "text": drafts["x_post"] ?? ""]) }
+                            catch { throw LibraryFailure.invalid("X draft validation unavailable or over 280 weighted characters") }
+                            if measured["valid"] as? Bool != true { throw LibraryFailure.invalid("X draft is invalid or over 280 weighted characters") }
+                        }
                     }
                     platforms[name] = ["status": status, "approved_revision": status == "approved" ? revision : NSNull()]
                 }
@@ -182,7 +191,7 @@ extension StoryStore {
         }
     }
     func librarySettings(kind: String? = nil, name: String? = nil, value: Any? = nil, write: Bool = false) throws -> [String: Any] {
-        try withDB { db in
+        try withDB(readOnly: !write) { db in
             if write {
                 guard let kind, ["search", "mute"].contains(kind), let name = name?.trimmingCharacters(in: .whitespacesAndNewlines),
                       !name.isEmpty, name.unicodeScalars.count <= 200 else { throw LibraryFailure.invalid("invalid preference") }

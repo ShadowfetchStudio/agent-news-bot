@@ -11,10 +11,12 @@ final class FreshnessStore: @unchecked Sendable {
         health = SourceHealth(path: path.deletingLastPathComponent().appendingPathComponent("source-health.sqlite"))
         do { try AppPaths.prepareDatabase(path) } catch { return }
         if sqlite3_open(path.path, &db) != SQLITE_OK {
+            if let handle = db { sqlite3_close(handle) }
             db = nil
             return
         }
         sqlite3_busy_timeout(db, 5000)
+        sqlite3_exec(db, "PRAGMA trusted_schema=OFF;", nil, nil, nil)
         sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
         sqlite3_exec(
             db,
@@ -135,6 +137,7 @@ final class FreshnessStore: @unchecked Sendable {
 
     func feedDocument(_ url: String) -> (data: Data, observedAt: Date)? {
         lock.lock(); defer { lock.unlock() }
+        guard db != nil else { return nil }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, "SELECT body,observed_at FROM feed_documents WHERE url=?", -1, &stmt, nil) == SQLITE_OK else { return nil }
@@ -172,7 +175,8 @@ final class FreshnessStore: @unchecked Sendable {
     }
 
     static func articleID(url: String, fallback: String) -> String {
-        let canon = CanonicalURL.fingerprint(url)
+        let seed = url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : url
+        let canon = CanonicalURL.fingerprint(seed)
         let digest = SHA256.hash(data: Data(canon.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return hex.isEmpty ? fallback : String(hex.prefix(24))

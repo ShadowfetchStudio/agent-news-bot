@@ -9,6 +9,17 @@ struct SettingsView: View {
     @State private var originalCredentials: [String: String] = [:]
     @State private var credentialMessage = ""
     @State private var confirmRotation = false
+    @State private var confirmSkillOverwrite = false
+    @State private var showBridgeToken = false
+    @State private var copiedToken = false
+    private var credentialsDirty: Bool {
+        (originalCredentials["worldmonitor"] != nil && worldMonitorKey != originalCredentials["worldmonitor"])
+            || (originalCredentials["hermes-api"] != nil && hermesToken != originalCredentials["hermes-api"])
+            || (originalCredentials["openclaw"] != nil && openClawToken != originalCredentials["openclaw"])
+    }
+    private var hermesTokenDirty: Bool {
+        originalCredentials["hermes-api"] != nil && hermesToken != originalCredentials["hermes-api"]
+    }
 
     var body: some View {
         Form {
@@ -51,7 +62,11 @@ struct SettingsView: View {
                 Text("CLI detection and a compatible model list do not verify model access. Test reply sends a short fixed prompt using your saved credentials and may use paid model capacity. Save credential changes first.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Test Hermes reply") { Task { await engine.testAgent(.hermes) } }.disabled(engine.agentTestRunning)
+                Button("Test Hermes reply") { Task { await engine.testAgent(.hermes) } }.disabled(engine.agentTestRunning || hermesTokenDirty)
+                if hermesTokenDirty {
+                    Text("Save credential changes below before testing Hermes with the new token.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 Button("Check connections without a model reply") { Task { await engine.refreshAgents() } }.disabled(engine.agentTestRunning)
                 Text(engine.hermes.detail).font(.caption).textSelection(.enabled)
             }
@@ -66,24 +81,62 @@ struct SettingsView: View {
                 Text(engine.openclaw.detail).font(.caption).textSelection(.enabled)
             }
             Section("Agent bridge") {
-                Stepper(value: $settings.bridgePort, in: 1025...64999, step: 1) {
-                    Text("Listen 127.0.0.1:\(settings.bridgePort)")
+                HStack {
+                    Text("Listen 127.0.0.1:")
+                    TextField("Port", value: $settings.bridgePort, format: .number.grouping(.never))
+                        .frame(width: 74)
+                        .textFieldStyle(.roundedBorder)
+                    Stepper("", value: $settings.bridgePort, in: 1025...64999, step: 1)
+                        .labelsHidden()
                 }
                 LabeledContent("Bearer token") {
-                    Text(engine.bridgeToken)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
+                    HStack(spacing: 6) {
+                        if showBridgeToken {
+                            Text(engine.bridgeToken)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        } else {
+                            Text(engine.bridgeToken.isEmpty ? "Unavailable" : String(repeating: "•", count: 16) + String(engine.bridgeToken.suffix(6)))
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                        Button(showBridgeToken ? "Hide" : "Reveal") { showBridgeToken.toggle() }
+                            .disabled(engine.bridgeToken.isEmpty)
+                        Button(copiedToken ? "Copied" : "Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(engine.bridgeToken, forType: .string)
+                            copiedToken = true
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                copiedToken = false
+                            }
+                        }
+                        .disabled(engine.bridgeToken.isEmpty)
+                    }
                 }
-                Button("Install agent skills") { engine.installAgentSkills() }
-                Button("Reload credential") { engine.reloadBridgeCredential() }
-                Button("Rotate bridge credential…") { confirmRotation = true }.disabled(engine.bridgeToken.isEmpty)
+                HStack {
+                    Button("Install agent skills") { engine.installAgentSkills(overwrite: false) }
+                    Button("Update existing skills…") { confirmSkillOverwrite = true }
+                }
+                if !engine.skillInstallMessage.isEmpty {
+                    Text(engine.skillInstallMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                HStack {
+                    Button("Reload credential") { engine.reloadBridgeCredential() }
+                    Button("Rotate bridge credential…") { confirmRotation = true }.disabled(engine.bridgeToken.isEmpty)
+                }
                 if !engine.bridgeCredentialError.isEmpty { Text(engine.bridgeCredentialError).foregroundStyle(.red).textSelection(.enabled) }
-                Text("Loopback only. Install skills for Hermes and other agents explicitly. Existing skill files are preserved.")
+                Text("Loopback only. Install creates missing skill files; Update replaces existing files with the current \(APIContract.appVersion) contract.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section("Credentials") {
+                if credentialsDirty {
+                    Label("You have unsaved credential changes.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold()).foregroundStyle(.orange)
+                }
                 Button("Save credential changes") { saveCredentials() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!credentialsDirty)
                 Text("Credentials are saved only with this button. Clearing a loaded field removes that credential. Closing Settings does not change saved credentials.")
                     .font(.caption).foregroundStyle(.secondary)
                 if !credentialMessage.isEmpty { Text(credentialMessage).textSelection(.enabled) }
@@ -94,10 +147,13 @@ struct SettingsView: View {
                     Toggle(desk.title, isOn: Binding(
                         get: { settings.enabledDesks.contains(desk) },
                         set: { on in
-                            if on { settings.enabledDesks.insert(desk) } else { settings.enabledDesks.remove(desk) }
+                            if on { settings.enabledDesks.insert(desk) }
+                            else if settings.enabledDesks.count > 1 { settings.enabledDesks.remove(desk) }
                         }
                     ))
+                    .disabled(settings.enabledDesks.count == 1 && settings.enabledDesks.contains(desk))
                 }
+                Text("At least one desk must remain enabled.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -107,6 +163,10 @@ struct SettingsView: View {
         .onChange(of: settings.openClawURL) { engine.invalidateAgent(.openclaw) }
         .confirmationDialog("Replace the bridge credential? Existing clients must reload the token file.", isPresented: $confirmRotation) {
             Button("Rotate credential", role: .destructive) { engine.rotateBridgeCredential() }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Replace existing agent SKILL.md files with the current \(APIContract.appVersion) version?", isPresented: $confirmSkillOverwrite) {
+            Button("Update skills", role: .destructive) { engine.installAgentSkills(overwrite: true) }
             Button("Cancel", role: .cancel) {}
         }
         .onAppear {

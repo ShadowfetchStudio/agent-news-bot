@@ -7,6 +7,9 @@ struct ContentView: View {
     @State private var showLibrary = false
     @State private var showAlerts = false
     @State private var alertCount: Int?
+    @State private var directEditorID: String?
+    @State private var directRepairID: String?
+    private struct StorySheetID: Identifiable { let id: String }
 
     var body: some View {
         NavigationSplitView {
@@ -37,6 +40,12 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories, refreshSnapshot: engine.refreshRepairedSnapshot) }
+        .sheet(item: Binding(get: { directEditorID.map { StorySheetID(id: $0) } }, set: { directEditorID = $0?.id })) { item in
+            EditorialView(store: engine.stories, storyID: item.id) { }
+        }
+        .sheet(item: Binding(get: { directRepairID.map { StorySheetID(id: $0) } }, set: { directRepairID = $0?.id })) { item in
+            GroupRepairView(store: engine.stories, storyID: item.id, refreshSnapshot: engine.refreshRepairedSnapshot)
+        }
     }
 
     private var sidebar: some View {
@@ -45,7 +54,19 @@ struct ContentView: View {
                 Button {
                     engine.selectedDesk = nil
                 } label: {
-                    Label("All stories", systemImage: "square.grid.2x2")
+                    HStack {
+                        Label("All stories", systemImage: "square.grid.2x2")
+                        Spacer()
+                        if !engine.articles.isEmpty {
+                            Text("\(engine.articles.count)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Theme.gold)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
+                    .background(engine.selectedDesk == nil ? Theme.gold.opacity(0.18) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 ForEach(Desk.allCases) { desk in
@@ -110,18 +131,28 @@ struct ContentView: View {
                     .padding()
                 Spacer()
             } else if engine.filtered.isEmpty {
+                let hasQuery = !engine.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 VStack(spacing: 10) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: hasQuery ? "magnifyingglass" : "sparkles")
                         .font(.largeTitle)
                         .foregroundStyle(Theme.gold)
-                    Text("No stories in this desk’s lookback window")
+                    Text(hasQuery ? "No stories match \"\(engine.search)\"" : "No stories in this desk’s lookback window")
                         .font(.title3.weight(.semibold))
-                    Text("Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Operations to inspect source failures and storage.")
+                    Text(hasQuery
+                         ? "Try clearing the filter, switching to All stories, or searching the full Research Library."
+                         : "Fetch Fresh scans RSS, Hacker News, Polymarket, markets, and weather. New stories and changed reports inside the lookback window appear here. Open Operations to inspect source failures and storage.")
                         .foregroundStyle(Theme.textMed)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 420)
-                    Button("Fetch Fresh") { Task { await engine.fetchFresh() } }
-                        .keyboardShortcut("r", modifiers: [.command])
+                    HStack {
+                        if hasQuery {
+                            Button("Clear filter") { engine.search = "" }
+                            Button("Open Research Library") { showLibrary = true }
+                        } else {
+                            Button("Fetch Fresh") { Task { await engine.fetchFresh() } }
+                                .keyboardShortcut("r", modifiers: [.command])
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -129,11 +160,18 @@ struct ContentView: View {
                     ArticleRow(article: article)
                         .tag(article)
                         .contextMenu {
+                            Button("Open in editor / drafts") { directEditorID = article.id }
+                            Button("Toggle bookmark") { engine.toggleBookmark(article) }
+                            Button("Repair grouping…") { directRepairID = article.id }
+                            Divider()
                             Button("Copy tweet") { engine.copyTweet(article) }
                                 .disabled(article.tweet.isEmpty || article.tweetChars > 280)
                             Button("Open story") { engine.openStory(article) }
+                            Divider()
                             Button("Send to Hermes") { Task { await engine.sendToHermes([article]) } }
+                                .disabled(engine.agentTestRunning || !engine.hermes.canSend)
                             Button("Send to OpenClaw") { Task { await engine.sendToOpenClaw([article]) } }
+                                .disabled(engine.agentTestRunning || !engine.openclaw.canSend)
                         }
                 }
                 .listStyle(.inset)
@@ -220,6 +258,12 @@ struct ContentView: View {
                                 .textSelection(.enabled)
                                 .padding(10)
                                 .anbCard()
+                        }
+                        HStack {
+                            Button("Open in editor / drafts") { directEditorID = article.id }
+                                .buttonStyle(.borderedProminent)
+                            Button("Bookmark") { engine.toggleBookmark(article) }
+                            Button("Repair group…") { directRepairID = article.id }
                         }
                         HStack {
                             Button("Copy tweet") { engine.copyTweet(article) }
@@ -340,7 +384,7 @@ struct ArticleRow: View {
 struct FlowTags: View {
     let tags: [String]
     var body: some View {
-        HStack(spacing: 6) {
+        WrappingFlowLayout(spacing: 6) {
             ForEach(tags, id: \.self) { tag in
                 Text(tag)
                     .font(.caption.weight(.semibold))
@@ -349,6 +393,38 @@ struct FlowTags: View {
                     .background(Theme.gold.opacity(0.15))
                     .clipShape(Capsule())
             }
+        }
+    }
+}
+
+private struct WrappingFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, usedWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > maxWidth {
+                x = 0; y += rowHeight + spacing; rowHeight = 0
+            }
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            usedWidth = max(usedWidth, min(x, maxWidth))
+        }
+        return CGSize(width: usedWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX; y += rowHeight + spacing; rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
         }
     }
 }

@@ -5,13 +5,14 @@ struct CoverageView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var history: [[String: Any]] = []
     @State private var historyError = ""
+    @State private var reloadToken = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Operations and coverage").font(.title2.bold())
                 Spacer()
-                Button("Reload history", action: reloadHistory)
+                Button("Reload all") { reloadToken += 1 }
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             Text("Results of the last refresh. A successful response means it was fetched and parsed; it does not verify the reporting.")
@@ -24,7 +25,7 @@ struct CoverageView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    OperatorControlsView().environmentObject(engine)
+                    OperatorControlsView(reloadToken: reloadToken).environmentObject(engine)
                     if !historyError.isEmpty { Text(historyError).foregroundStyle(.red) }
                     if !history.isEmpty {
                         DisclosureGroup("Persistent source history (\(history.count))") {
@@ -69,11 +70,15 @@ struct CoverageView: View {
                 }
             }
         }.padding(20).frame(minWidth: 620, minHeight: 480)
-            .onAppear(perform: reloadHistory)
+            .task(id: reloadToken) { await reloadHistory() }
     }
-    private func reloadHistory() {
-        do { history = try engine.store.health.list(); historyError = "" }
-        catch { historyError = "Source history could not be read. Check local storage." }
+    @MainActor private func reloadHistory() async {
+        let health = engine.store.health
+        do {
+            let data = try await Task.detached { try JSONSerialization.data(withJSONObject: health.list()) }.value
+            history = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []
+            historyError = ""
+        } catch { historyError = "Source history could not be read. Check local storage." }
     }
     private func timestamp(_ value: Any?) -> String {
         guard let seconds = value as? Double, seconds > 0 else { return "Never" }

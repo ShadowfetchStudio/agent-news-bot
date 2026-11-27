@@ -31,16 +31,10 @@ Persistent source history and backoff are available in Operations, `GET /v1/sour
 
 ## Downloads and release status
 
-[Download version 1.2.0](https://github.com/ShadowfetchStudio/agent-news-bot/releases/tag/v1.2.0).
-The Mac ZIP is **Apple Silicon, macOS 14+, ad-hoc signed and not notarized**.
-Read [Mac installation](docs/MAC_INSTALL.md) before opening it. Linux ships a
-source installer for the headless systemd service; dependency installation needs
-network access and Python 3.10+. SHA-256 checksums and source commit metadata ship
-with both downloads. No research archives, user configuration or credentials are
-part of a release package.
+[Download version 1.3.0 (macOS native)](https://github.com/ShadowfetchStudio/agent-news-bot/releases/tag/v1.3.0).
+Agent News Bot development is now **focused exclusively on the native macOS SwiftUI app** (Apple Silicon, macOS 14+). The Linux Python daemon remains in the repository frozen at `1.2.0` for legacy reference and will no longer receive feature upgrades. Read [Mac installation](docs/MAC_INSTALL.md) before opening the Mac release ZIP. SHA-256 checksums and source commit metadata ship with the release. No research archives, user configuration or credentials are part of a release package.
 
-See [release notes and validation limits](docs/RELEASE_NOTES_1.2.0.md),
-[Linux upgrades](docs/LINUX_UPGRADES.md), and [application recovery](docs/APPLICATION_RECOVERY.md).
+See [v1.3.0 release notes](docs/RELEASE_NOTES_1.3.0.md), [v1.2.0 release notes](docs/RELEASE_NOTES_1.2.0.md), and [application recovery](docs/APPLICATION_RECOVERY.md).
 
 ## Table of contents
 
@@ -81,7 +75,7 @@ See [release notes and validation limits](docs/RELEASE_NOTES_1.2.0.md),
 - **Saved-search alerts and review queue.** Watch future matching revisions in a durable local inbox, pause/resume without duplicates, and review changed approved drafts independently. Unread matches retain their revision evidence; no email, OS notification or automatic posting. [Alerts and API guide](docs/SAVED_SEARCH_ALERTS.md).
 - **Persistent research library.** Search retained stories beyond the fresh batch, save watchlists, bookmark stories and mute sources without losing agent events. Review source links and revision history, edit YouTube/X/TikTok templates, and approve a specific revision. Corrections require review again. [Library, API and CLI guide](docs/RESEARCH_LIBRARY.md).
 - **Portable research packages.** Export saved drafts, provenance and source URLs into a separate private folder for each export. Paste URLs into VideoBot's Inspect URLs workflow; review media availability and rights before queueing. No automatic publishing or downloads.
-- **Observable source coverage.** The Mac Coverage window and HTTP/JSON output distinguish successful, partial, stale, unavailable and unknown checks. New, updated, carried and displayed counts are separate.
+- **Observable source coverage.** The Mac **Operations** view and HTTP/JSON output distinguish successful, partial, stale, unavailable and unknown checks. New, updated, carried and displayed counts are separate.
 - **Token-authenticated localhost bridge.** `GET /v1/fresh`, `/v1/desks`, `/v1/status`, and
   `POST /v1/fetch`, bound to `127.0.0.1` only, behind a bearer token that is generated on first run.
 - **Two runtimes, one contract.** Native macOS app *and* headless Linux daemon expose the same API.
@@ -262,7 +256,7 @@ curl -sS -H "Authorization: Bearer $TOKEN"  'http://127.0.0.1:18765/v1/desks'
 curl -sS -X POST -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:18765/v1/fetch'
 ```
 
-On macOS the token is shown in **Settings → Bridge** and is written to
+On macOS the token is shown (masked by default with Reveal & Copy controls) in **Settings → Agent bridge** and is written to
 `~/Library/Application Support/AgentNewsBot/bridge.token`.
 
 **Article JSON shape:**

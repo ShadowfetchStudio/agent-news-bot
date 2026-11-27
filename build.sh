@@ -4,14 +4,18 @@ set -euo pipefail
 
 INSTALL=0
 ARCH="$(uname -m)"
+SIGN_IDENTITY="-"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --install) INSTALL=1; shift ;;
     --arch)
       ARCH="${2:-}"
       shift 2 ;;
+    --sign)
+      SIGN_IDENTITY="${2:-}"
+      shift 2 ;;
     --help|-h)
-      echo "Usage: ./build.sh [--install] [--arch arm64|x86_64|universal]"
+      echo "Usage: ./build.sh [--install] [--arch arm64|x86_64|universal] [--sign <identity>]"
       echo "Builds under build/. --install copies to /Applications only if absent."
       echo "Existing applications and NewsBot data are never removed."
       exit 0 ;;
@@ -63,6 +67,7 @@ iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 cp "$PROJECT_DIR/linux/agent_newsbot/vendor/twitter-text.js" "$APP_DIR/Contents/Resources/"
 cp "$PROJECT_DIR/linux/agent_newsbot/vendor/"*-LICENSE.txt "$APP_DIR/Contents/Resources/"
+cp "$PROJECT_DIR/skills/agent-news-bot/SKILL.md" "$APP_DIR/Contents/Resources/SKILL.md"
 for helper in recovery maintenance retention application_recovery; do
     cp "$PROJECT_DIR/linux/agent_newsbot/$helper.py" "$APP_DIR/Contents/Resources/"
 done
@@ -114,8 +119,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key><string>$BIN_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.2.0</string>
-    <key>CFBundleVersion</key><string>2</string>
+    <key>CFBundleShortVersionString</key><string>1.3.0</string>
+    <key>CFBundleVersion</key><string>3</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.news</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -131,9 +136,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-python3 - "$PROJECT_DIR" "$APP_DIR/Contents/Resources/BuildInfo.json" "$ARCH" <<'PYINFO'
+python3 - "$PROJECT_DIR" "$APP_DIR/Contents/Resources/BuildInfo.json" "$ARCH" "$SIGN_IDENTITY" <<'PYINFO'
 import datetime, json, pathlib, subprocess, sys
-root, output, architecture = sys.argv[1:]
+root, output, architecture, sign_identity = sys.argv[1:]
 if (pathlib.Path(root)/'.git').exists():
     commit = subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()
     dirty = bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip())
@@ -141,12 +146,18 @@ else:
     manifest = pathlib.Path(root)/'RELEASE-INFO.json'
     commit = json.loads(manifest.read_text()).get('source_commit') if manifest.exists() else None
     dirty = None  # Source archives have no Git working-tree integrity check.
+signing = 'ad-hoc' if sign_identity == '-' else sign_identity
 pathlib.Path(output).write_text(json.dumps(dict(source_commit=commit,source_dirty=dirty,architecture=architecture,
-    built_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),signing='ad-hoc',notarized=False),indent=2)+'\n')
+    built_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),signing=signing,notarized=False),indent=2)+'\n')
 PYINFO
 
-echo "==> Ad-hoc sign"
-codesign --force --deep --sign - "$APP_DIR"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  echo "==> Ad-hoc sign"
+  codesign --force --deep --sign - "$APP_DIR"
+else
+  echo "==> Code sign ($SIGN_IDENTITY)"
+  codesign --force --deep --timestamp=none --sign "$SIGN_IDENTITY" "$APP_DIR"
+fi
 codesign --verify --deep --strict "$APP_DIR"
 
 if [[ "$INSTALL" == 1 ]]; then

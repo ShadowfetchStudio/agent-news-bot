@@ -19,12 +19,12 @@ extension StoryStore {
         if let generation, generation != gen { throw ConsumerFailure.conflict("consumer generation changed; fetch again") }
         if ack && gen > 0 && generation == nil { throw ConsumerFailure.conflict("acknowledgement requires the current generation") }
         if lease != nil || until > Date().timeIntervalSince1970 {
-            guard let lease, !lease.isEmpty, until > Date().timeIntervalSince1970, lease == row[1] else { throw ConsumerFailure.conflict("active matching worker lease required") }
+            guard let lease, !lease.isEmpty, until > Date().timeIntervalSince1970, AgentBridge.constantTimeEqual(lease, row[1]) else { throw ConsumerFailure.conflict("active matching worker lease required") }
         }
         return gen
     }
     func consumerStatus() throws -> [String: Any] {
-        try withDB { db in
+        try withDB(readOnly: true) { db in
             let rows = try run(db, "SELECT c.name,c.cursor,c.offered,coalesce(m.generation,0),m.last_ack,coalesce(m.lease_worker,''),coalesce(m.lease_until,0),(SELECT count(*) FROM events WHERE seq>c.cursor) FROM consumers c LEFT JOIN consumer_meta m ON m.name=c.name ORDER BY c.name")
             let latest = Int(try run(db, "SELECT coalesce(max(seq),0) FROM events")[0][0]) ?? 0
             let consumers: [[String: Any]] = rows.map { row in

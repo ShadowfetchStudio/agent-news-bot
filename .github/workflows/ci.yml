@@ -47,10 +47,14 @@ jobs:
         run: bash -n build.sh
       - name: Build Apple Silicon app bundle
         run: ./build.sh --arch arm64
-      - name: Verify architecture & code signature
+      - name: Verify architecture, code signature & bundled helpers
         run: |
           file "build/Agent News Bot.app/Contents/MacOS/AgentNewsBot" | grep -q "arm64"
           codesign --verify --deep --strict "build/Agent News Bot.app"
+          test -f "build/Agent News Bot.app/Contents/Resources/SKILL.md"
+          for helper in recovery maintenance retention application_recovery; do
+            python3 "build/Agent News Bot.app/Contents/Resources/${helper}.py" --help >/dev/null
+          done
 
   dependency-audit:
     name: Locked dependency audit

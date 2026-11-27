@@ -54,11 +54,14 @@ enum WorldMonitorClient {
     }
 
     static func origin(_ raw: String) throws -> URL {
-        guard ArticleURL.validated(raw) != nil, let c = URLComponents(string: raw), let host = c.host, !host.isEmpty,
+        guard let c = URLComponents(string: raw), let host = c.host, !host.isEmpty else { throw Failure.configuration }
+        let scheme = c.scheme?.lowercased() ?? ""
+        let lowerHost = host.lowercased()
+        guard ArticleURL.validated(raw) != nil,
               c.user == nil, c.password == nil, c.query == nil, c.fragment == nil,
               c.port == nil || (1...65535).contains(c.port!),
-              c.path == "" || c.path == "/", ["http", "https"].contains(c.scheme ?? ""),
-              c.scheme == "https" || ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host),
+              c.path == "" || c.path == "/", ["http", "https"].contains(scheme),
+              scheme == "https" || ["localhost", "127.0.0.1", "::1", "[::1]"].contains(lowerHost),
               let url = c.url else { throw Failure.configuration }
         return url
     }
@@ -122,7 +125,7 @@ enum WorldMonitorClient {
             for raw in rows.prefix(1000) {
                 guard let row = raw as? [String: Any], let rawLink = row["link"] as? String,
                       ArticleURL.validated(rawLink) != nil,
-                      let c = URLComponents(string: rawLink), ["http", "https"].contains(c.scheme ?? ""), c.host != nil,
+                      let c = URLComponents(string: rawLink), ["http", "https"].contains(c.scheme?.lowercased() ?? ""), c.host != nil,
                       let rawTitle = row["title"] as? String, let millis = row["publishedAt"] as? NSNumber,
                       millis.doubleValue.isFinite else { skipped += 1; continue }
                 let title = String(HTMLText.strip(rawTitle).prefix(2000))

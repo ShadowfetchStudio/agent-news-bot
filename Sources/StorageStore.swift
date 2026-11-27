@@ -71,8 +71,8 @@ extension StoryStore {
         let expected = policy["max_journal_bytes"]! / size
         guard try run(db, "PRAGMA max_page_count=\(expected)").first?.first == String(expected) else { throw StorageFailure.blocked }
     }
-    func storagePreflight() throws { try withDB { try storageGuard($0) } }
-    func storageStatus() throws -> [String: Any] { try withDB { try storageSnapshot($0) } }
+    func storagePreflight() throws { try withDB(readOnly: true) { try storageGuard($0) } }
+    func storageStatus() throws -> [String: Any] { try withDB(readOnly: true) { try storageSnapshot($0) } }
     func storageChange(_ value: [String: Any]) throws -> [String: Any] {
         guard Set(value.keys) == ["expected_version", "max_journal_bytes", "min_free_bytes"] else {
             throw LibraryFailure.invalid("expected_version and both storage limits required")
