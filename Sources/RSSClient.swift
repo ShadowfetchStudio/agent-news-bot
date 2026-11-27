@@ -110,7 +110,7 @@ final class RSSParser: NSObject, XMLParserDelegate {
     }
 
     private func name(_ value: String) -> String { value.lowercased().split(separator: ":").last.map(String.init) ?? "" }
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributes: [String: String] = [:]) {
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
         let tag = name(elementName)
         if depth == 0 { validRoot = ["rss", "feed", "rdf"].contains(tag) }
         depth += 1
@@ -119,9 +119,9 @@ final class RSSParser: NSObject, XMLParserDelegate {
             inItem = true; itemDepth = depth; current = RSSItem(); field = nil
         }
         guard inItem else { return }
-        if depth == itemDepth + 1, tag == "link", let href = attributes["href"],
-            ["", "alternate"].contains(attributes["rel"] ?? ""),
-            ["", "text/html", "application/xhtml+xml"].contains(attributes["type"] ?? "") {
+        if depth == itemDepth + 1, tag == "link", let href = attributeDict["href"],
+            ["", "alternate"].contains(attributeDict["rel"] ?? ""),
+            ["", "text/html", "application/xhtml+xml"].contains(attributeDict["type"] ?? "") {
             current.link = href
         }
         if field == nil && depth == itemDepth + 1 && ["title", "link", "guid", "id", "description", "summary", "content", "encoded", "pubdate", "published", "updated", "date"].contains(tag) {

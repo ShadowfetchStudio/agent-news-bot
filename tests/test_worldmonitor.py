@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -882,3 +882,74 @@ def test_linux_new_story_does_not_erase_other_current_stories(tmp_path, monkeypa
                                   {"articles": [new], "fetched_at": stamp, "desks": [{"desk": "science", "fresh": 1}]})
     assert result["total_articles"] == 2
     assert (result["desks"][0]["new"], result["desks"][0]["carried"]) == (1, 1)
+
+
+def test_native_agent_process_output_failure_and_limit(swift_harness):
+    result = swift(swift_harness, "process", "/bin/sh", 3, 1000000, "-c", "printf hello; printf diagnostic >&2")
+    assert result == {"output": "hello"}
+    failed = swift(swift_harness, "process", "/bin/sh", 3, 1000000, "-c", "printf failure >&2; exit 7")
+    assert "exited 7" in failed["error"] and "failure" in failed["error"]
+    missing = swift(swift_harness, "process", "/nonexistent/agent", 1, 1000)
+    assert "Could not start" in missing["error"]
+    flood = swift(swift_harness, "process", "/usr/bin/yes", 3, 10000, "output")
+    assert "output limit" in flood["error"]
+
+
+def test_native_agent_process_timeout_stops_owned_descendants(swift_harness, tmp_path):
+    import time
+    child_file = tmp_path / "child.pid"
+    start = time.monotonic()
+    result = swift(swift_harness, "process", "/bin/sh", .2, 10000, "-c", 'sleep 30 & echo $! > "$1"; wait', "fixture", child_file)
+    assert "time limit" in result["error"]
+    assert time.monotonic() - start < 3
+    pid = int(child_file.read_text())
+    # An exited child can briefly remain a zombie until launchd reaps it.
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    assert not state or state.startswith("Z"), state
+
+
+def test_native_agent_process_cancellation(swift_harness):
+    import time
+    env = dict(os.environ, ANB_CANCEL_PROCESS="1")
+    start = time.monotonic()
+    result = json.loads(subprocess.check_output([str(swift_harness), "process", "/bin/sleep", "10", "10000", "20"], env=env))
+    assert result["cancelled"] is True
+    assert time.monotonic() - start < 3
+
+
+def test_native_hermes_probe_rejects_unauthorized_api(swift_harness):
+    with provider({}, 401) as (base, _):
+        assert swift(swift_harness, "hermes-probe", base)["ready"] is False
+
+
+@pytest.mark.parametrize("mode", ["success", "redirect", "oversize"])
+def test_native_hermes_http_handoff_bounds(swift_harness, mode):
+    calls = []
+    class Agent(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            calls.append((self.path, body))
+            self.send_response(302 if mode == "redirect" else 200)
+            if mode == "redirect": self.send_header("Location", "/redirected")
+            self.end_headers()
+            result = b"x" * (2 * 1024 * 1024 + 1) if mode == "oversize" else json.dumps({"choices": [{"message": {"content": "Draft accepted"}}]}).encode()
+            try: self.wfile.write(result)
+            except (BrokenPipeError, ConnectionResetError): pass
+        def log_message(self, *args): pass
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Agent)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True); thread.start()
+    try:
+        result = swift(swift_harness, "hermes-api", f"http://127.0.0.1:{httpd.server_port}")
+        assert len(calls) == 1
+        assert calls[0][0] == "/v1/chat/completions"
+        assert "Prepare drafts only; do not publish" in calls[0][1]["messages"][0]["content"]
+        assert result == ({"output": "Draft accepted"} if mode == "success" else {"error": "handoff failed"})
+    finally:
+        httpd.shutdown(); httpd.server_close(); thread.join()
+
+
+def test_native_port_probe_invalid_and_listening(swift_harness):
+    assert swift(swift_harness, "port-probe", "ws://127.0.0.1:99999")["ready"] is False
+    with provider({}) as (base, _):
+        assert swift(swift_harness, "port-probe", base)["ready"] is True
+    assert swift(swift_harness, "port-probe", base)["ready"] is False

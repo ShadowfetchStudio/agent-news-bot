@@ -98,3 +98,12 @@ Remaining larger work includes weighted X counting, complete coverage/count repo
 - Five targeted snapshot/isolation tests passed on Mac, including pre-existing Linux restoration expiry coverage. Full-suite/build results are recorded after completion below.
 
 Snapshot batch validation: 93 tests passed on macOS; 60 passed with 33 native-Mac skips on Pop!_OS. The Apple Silicon app built and passed strict ad-hoc signing. Snapshot policy and isolated namespaces are verified; the actual GUI/timer walkthrough and existing agent subprocess warnings remain open. The previous Linux development wheel was separately installed outside the checkout and verified to contain/run the shared parser (CJK regression returns 280); final release assets will be rebuilt after all remaining changes.
+
+## Agent handoff repairs
+
+- Replaced both unbounded native CLI paths with an owned-process-group runner: 120-second deadline, 2 MiB output ceiling, cancellation and descendant cleanup, concurrent pipe draining and child reaping. Removed blocking subprocess-based executable discovery.
+- Native process fixtures passed for successful output, nonzero exits, missing executable, output flood, timeout cleanup of a child and cancellation. Native HTTP fixtures passed for successful draft handoff, redirect rejection, oversized-response rejection and unauthorized readiness.
+- Hermes API handoffs now have total resource/response bounds and refuse redirects. OpenClaw gateway-only detection no longer enables an unsupported CLI send; invalid ports are rejected without integer conversion traps. Shared mutable completion captures were replaced with synchronized state.
+- Actual installed-agent compatibility and GUI handoff remain open. Controlled fixtures are not an actual agent acceptance.
+
+Latest native validation: 101 tests passed; the Apple Silicon app built without compiler warnings and passed strict ad-hoc signature verification. The prior Linux validation remains 60 passed/33 native-Mac skips; changes since then are native agent execution and native-only tests. No production app was installed or user data overwritten. No release assets have been published yet.

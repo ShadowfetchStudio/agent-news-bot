@@ -18,8 +18,8 @@ enum HermesClient {
                 }
                 if let (_, response) = try? await URLSession.shared.data(for: request),
                    let http = response as? HTTPURLResponse,
-                   (200..<500).contains(http.statusCode) {
-                    apiReady = http.statusCode < 500
+                   (200..<300).contains(http.statusCode) {
+                    apiReady = true
                 }
             }
         }
@@ -35,9 +35,7 @@ enum HermesClient {
         if apiReady {
             return AgentStatus(kind: .hermes, label: "Hermes API", detail: settings.hermesAPIURL, ready: true)
         }
-        if cli != nil {
-            return AgentStatus(kind: .hermes, label: "Hermes CLI", detail: cli!, ready: true)
-        }
+
         return AgentStatus(
             kind: .hermes,
             label: "Hermes",
@@ -84,39 +82,7 @@ enum HermesClient {
     }
 
     private static func runCLI(path: String, prompt: String) async throws -> String {
-        try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = ["chat", "-Q", "-q", prompt, "--max-turns", "4"]
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            try process.run()
-
-            var stdoutData = Data()
-            var stderrData = Data()
-            let group = DispatchGroup()
-            group.enter()
-            DispatchQueue.global().async {
-                stdoutData = out.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                stderrData = err.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.wait()
-            process.waitUntilExit()
-
-            let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-            if process.terminationStatus != 0 {
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                throw NSError(domain: "Hermes", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr.isEmpty ? stdout : stderr])
-            }
-            return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.value
+        try await AgentProcess.run(path: path, arguments: ["chat", "-Q", "-q", prompt, "--max-turns", "4"])
     }
 
     @MainActor
@@ -136,9 +102,19 @@ enum HermesClient {
             "messages": [["role": "user", "content": prompt]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 120
+        let session = URLSession(configuration: configuration, delegate: NoAgentRedirects(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
+        }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > 2 * 1024 * 1024 { throw URLError(.dataLengthExceedsMaximum) }
         }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let choices = json?["choices"] as? [[String: Any]]
@@ -147,21 +123,15 @@ enum HermesClient {
     }
 
     static func which(_ name: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
-        process.environment = ProcessInfo.processInfo.environment.merging([
-            "PATH": "/Users/\(NSUserName())/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-        ]) { _, new in new }
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
-        let path = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let path, !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) { return path }
-        let fallback = "/Users/\(NSUserName())/.local/bin/\(name)"
-        return FileManager.default.isExecutableFile(atPath: fallback) ? fallback : nil
+        guard !name.isEmpty, !name.contains("/") else { return nil }
+        let paths = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path,
+                     "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"]
+        return paths.map { URL(fileURLWithPath: $0).appendingPathComponent(name).path }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
+}
+
+private final class NoAgentRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }

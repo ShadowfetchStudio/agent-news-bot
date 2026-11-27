@@ -17,8 +17,8 @@ enum OpenClawClient {
             return AgentStatus(
                 kind: .openclaw,
                 label: "OpenClaw Gateway",
-                detail: settings.openClawURL,
-                ready: true
+                detail: "Gateway detected; install CLI for handoff, or pull via the local bridge.",
+                ready: false
             )
         }
         return AgentStatus(
@@ -43,53 +43,17 @@ enum OpenClawClient {
     }
 
     private static func runCLI(path: String, prompt: String) async throws -> String {
-        try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: path)
-            process.arguments = ["agent", "--message", prompt]
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            try process.run()
-
-            var stdoutData = Data()
-            var stderrData = Data()
-            let group = DispatchGroup()
-            group.enter()
-            DispatchQueue.global().async {
-                stdoutData = out.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                stderrData = err.fileHandleForReading.readDataToEndOfFile()
-                group.leave()
-            }
-            group.wait()
-            process.waitUntilExit()
-
-            let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-            if process.terminationStatus != 0 {
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-                throw NSError(domain: "OpenClaw", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: stderr.isEmpty ? stdout : stderr])
-            }
-            return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.value
+        try await AgentProcess.run(path: path, arguments: ["agent", "--message", prompt])
     }
 
     static func portOpen(_ urlString: String) async -> Bool {
         guard let url = URL(string: urlString), let host = url.host else { return false }
         let port = url.port ?? (url.scheme == "wss" || url.scheme == "https" ? 443 : 18789)
-        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return false }
+        guard (1...65535).contains(port), let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return false }
         return await withCheckedContinuation { cont in
-            let lock = NSLock()
-            var done = false
+            let completion = ProbeCompletion()
             let finish: @Sendable (Bool, NWConnection) -> Void = { value, connection in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !done else { return }
-                done = true
+                guard completion.claim() else { return }
                 connection.cancel()
                 cont.resume(returning: value)
             }
@@ -110,4 +74,10 @@ enum OpenClawClient {
             }
         }
     }
+}
+
+private final class ProbeCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool { lock.withLock { if done { return false }; done = true; return true } }
 }

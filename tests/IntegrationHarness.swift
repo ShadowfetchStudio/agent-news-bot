@@ -4,6 +4,31 @@ import Security
 @main struct IntegrationHarness {
     static func main() async throws {
         let args = CommandLine.arguments
+        if args[1] == "port-probe" { try output(["ready": await OpenClawClient.portOpen(args[2])]); return }
+        if args[1] == "hermes-api" || args[1] == "hermes-probe" {
+            let settings = await MainActor.run { () -> SettingsStore in
+                let settings = SettingsStore.shared
+                settings.hermesUseCLI = false
+                settings.hermesAPIURL = args[2]
+                return settings
+            }
+            if args[1] == "hermes-probe" {
+                let status = await HermesClient.probe(settings: settings)
+                try output(["ready": status.ready]); return
+            }
+            do { try output(["output": try await HermesClient.send(articles: [], settings: settings)]) }
+            catch { try output(["error": "handoff failed"]) }
+            return
+        }
+        if args[1] == "process" {
+            let task = Task { try await AgentProcess.run(path: args[2], arguments: Array(args.dropFirst(5)), timeout: Double(args[3])!, maxOutput: Int(args[4])!) }
+            if ProcessInfo.processInfo.environment["ANB_CANCEL_PROCESS"] == "1" {
+                try await Task.sleep(nanoseconds: 100_000_000); task.cancel()
+            }
+            do { try output(["output": try await task.value]) }
+            catch { try output(["error": error.localizedDescription, "cancelled": error is CancellationError]) }
+            return
+        }
         if args[1] == "snapshot" {
             let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String: Any]
             let restored = SnapshotPolicy.restore(value, lookback: 12, enabled: [.science, .tech], limit: 20,
