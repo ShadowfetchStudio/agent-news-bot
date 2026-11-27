@@ -5,6 +5,8 @@ struct ContentView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @State private var showCoverage = false
     @State private var showLibrary = false
+    @State private var showAlerts = false
+    @State private var alertCount: Int?
 
     var body: some View {
         NavigationSplitView {
@@ -22,6 +24,18 @@ struct ContentView: View {
             SetupView().environmentObject(engine).interactiveDismissDisabled()
         }
         .sheet(isPresented: $showCoverage) { CoverageView().environmentObject(engine) }
+        .sheet(isPresented:$showAlerts) { AlertsView(store:engine.stories) }
+        .task(id:settings.setupCompleted) {
+            guard settings.setupCompleted else { return }
+            while !Task.isCancelled {
+                do {
+                    let store=engine.stories
+                    let count=try await Task.detached { try store.alerts(["limit":"1"])["unread_count"] as? Int ?? 0 }.value
+                    try Task.checkCancellation();alertCount=count
+                } catch is CancellationError { break } catch { alertCount=nil }
+                do { try await Task.sleep(nanoseconds:5_000_000_000) } catch { break }
+            }
+        }
         .sheet(isPresented: $showLibrary) { LibraryView(store: engine.stories, refreshSnapshot: engine.refreshRepairedSnapshot) }
     }
 
@@ -247,6 +261,13 @@ struct ContentView: View {
                 .foregroundStyle(Theme.textHi)
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            Button { showAlerts = true } label: {
+                HStack(spacing:3) {
+                    Image(systemName:(alertCount ?? 0)>0 ? "bell.badge.fill" : "bell")
+                    if let alertCount, alertCount>0 { Text(String(alertCount)).font(.caption.monospacedDigit()) }
+                }
+            }.accessibilityLabel(Text(alertCount.map { "Alerts, \($0) unread" } ?? "Alerts unavailable"))
+                .help("Saved-search alerts")
             Button { showLibrary = true } label: { Label("Library / drafts", systemImage: "books.vertical") }
             Button { showCoverage = true } label: { Label("Coverage", systemImage: "list.bullet.clipboard") }
             Button {

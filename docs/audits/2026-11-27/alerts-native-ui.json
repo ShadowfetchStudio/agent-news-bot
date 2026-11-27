@@ -1,0 +1,11 @@
+{
+  "fixture": "/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-alert-ui-mzwaplcm",
+  "unread_after_mark_seen": 0,
+  "matched_revision": 6,
+  "subscription_version": 3,
+  "review_queue_preserved": true,
+  "api_agrees": true,
+  "pause_resume_verified": true,
+  "native_controls": "Created watch in Library; pause, resume, mark seen, include seen and open current story exercised. Final ScrollView rows expose distinct AX buttons. Current story opens revision 6 and needs review after seen.",
+  "visual": "800x600 inbox inspected; no overlapping labels or controls; toolbar unread count and AX label verified. Full VoiceOver audit remains separate."
+}

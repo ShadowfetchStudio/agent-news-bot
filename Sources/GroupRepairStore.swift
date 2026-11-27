@@ -107,6 +107,7 @@ extension StoryStore {
             let result = try encode(receipt)
             guard result.utf8.count <= 4 * 1024 * 1024 else { throw LibraryFailure.invalid("repair evidence exceeds 4 MiB; no changes saved") }
             try run(db, "INSERT INTO group_repairs VALUES (?,?,?,?)", [op, request, result, String(now.timeIntervalSince1970)])
+            try recordAlerts(db, storyIDs: refs.compactMap { $0["id"] as? String })
             return receipt
         }
     }

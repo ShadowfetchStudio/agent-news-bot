@@ -12,6 +12,7 @@ from pathlib import Path
 from .store import canonical_url, title_tokens, is_near_duplicate_title, article_id, can_group_titles
 from .hashtags import tweet
 from .library import LibraryMixin, SCHEMA
+from .alerts import AlertMixin, SCHEMA as ALERT_SCHEMA, record_alerts
 from .group_repairs import GroupRepairMixin, REPAIR_SCHEMA
 from .retention import SCHEMA as RETENTION_SCHEMA, retained_guard
 from .consumers import ConsumerMixin, CONSUMER_SCHEMA, delivery_guard
@@ -63,7 +64,7 @@ def reports_disagree(sources):
     return False
 
 
-class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
+class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin, AlertMixin):
     def __init__(self, path: Path):
         self.path = path
         private_database(path)
@@ -81,7 +82,7 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
                 CREATE TABLE IF NOT EXISTS migrations(name TEXT PRIMARY KEY);
             ''')
 
-            for sql in SCHEMA: db.execute(sql)
+            for sql in SCHEMA + ALERT_SCHEMA: db.execute(sql)
             db.execute(CONSUMER_SCHEMA)
             db.execute(RETENTION_SCHEMA)
             db.execute(REPAIR_SCHEMA)
@@ -190,6 +191,7 @@ class StoryStore(LibraryMixin, ConsumerMixin, GroupRepairMixin):
                     story["event_seq"] = cur.lastrowid
                     changed.append(story)
                 db.execute("INSERT OR REPLACE INTO stories VALUES (?,?,?)", (story_id, encoded(story), now.timestamp()))
+            record_alerts(db, [row["id"] for row in changed])
             return changed
 
     def story(self, story_id: str) -> dict | None:

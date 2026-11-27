@@ -292,10 +292,10 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
         return hmac.compare_digest(auth.encode('utf-8'), expected_bearer.encode('utf-8')) or hmac.compare_digest(alt.encode('utf-8'), STATE.token.encode('utf-8'))
 
     def _library(self, method, parsed):
-        paths = {"/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs", "/v1/consumers"}
+        paths = {"/v1/library", "/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs", "/v1/consumers"}
         if parsed.path not in paths:
             self._send(404, {"error": "not found"}); return
-        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs", "/v1/consumers"}):
+        if method != "GET" and not (method == "POST" and parsed.path in {"/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs", "/v1/consumers"}):
             self._send(405, {"error": "method not allowed"}); return
         try:
             query = {k: v[-1] for k, v in parse_qs(parsed.query, keep_blank_values=True).items()}
@@ -310,6 +310,9 @@ class Handler(DeadlineHandlerMixin, BaseHTTPRequestHandler):
                 body = json.loads(raw)
                 if not isinstance(body, dict): raise ValueError("JSON object required")
             if parsed.path == "/v1/consumers": result = STATE.stories.consumer_status() if method == "GET" else STATE.stories.consumer_change(body)
+            elif parsed.path == "/v1/library/alerts":
+                if method == "POST" and query: raise ValueError("alerts POST does not accept query parameters")
+                result = STATE.stories.alerts(query) if method == "GET" else STATE.stories.alert_change(body)
             elif parsed.path == "/v1/library/repairs":
                 if method == "POST":
                     if query: raise ValueError("repair POST does not accept query parameters")

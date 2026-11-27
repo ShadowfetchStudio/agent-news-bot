@@ -100,6 +100,7 @@ def selection(db, before, limit):
     boundary = db.execute('SELECT min(cursor) FROM consumers').fetchone()[0]
     if boundary is None:
         boundary = 0
+    alert_guard = 'AND NOT EXISTS (SELECT 1 FROM watch_matches w WHERE w.seq=e.seq AND w.seen_seq<w.seq)' if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watch_matches'").fetchone() else ''
     rows = db.execute('''SELECT e.seq,e.story_id,e.payload FROM events e
       LEFT JOIN editorial d ON d.story_id=e.story_id
       WHERE e.seq<=? AND julianday(json_extract(e.payload,'$.updated_at'))<julianday(?)
@@ -110,7 +111,7 @@ def selection(db, before, limit):
       AND NOT (json_extract(e.payload,'$.revision') IS json_extract(d.payload,'$.approved_revision'))
       AND NOT EXISTS (SELECT 1 FROM json_each(d.payload,'$.platforms') p
         WHERE json_extract(p.value,'$.approved_revision')=json_extract(e.payload,'$.revision'))
-      ORDER BY e.seq LIMIT ?''', (boundary, before, limit))
+      ''' + alert_guard + ' ORDER BY e.seq LIMIT ?', (boundary, before, limit))
     total = 0
     entries = []
     for seq, story_id, raw in rows:

@@ -120,6 +120,8 @@ class GroupRepairMixin:
             result = encoded(receipt)
             if len(result.encode()) > 4 * 1024 * 1024: raise ValueError("repair evidence exceeds 4 MiB; no changes saved")
             db.execute("INSERT INTO group_repairs VALUES (?,?,?,?)", (op, request, result, now.timestamp()))
+            from .alerts import record_alerts
+            record_alerts(db, [row["id"] for row in receipt["after"]])
             return receipt
 
     def repair_receipt(self, operation_id):

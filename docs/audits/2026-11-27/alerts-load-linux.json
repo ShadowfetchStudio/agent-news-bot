@@ -1,0 +1,18 @@
+{
+  "platform": "Linux-7.2.6-76070206-generic-x86_64-with-glibc2.39",
+  "fixture": "/tmp/anb-alert-load-cmjgejml",
+  "scope": "Synthetic local 32 subscriptions, 200 stories and five revisions each; warm timing, not long-running production or concurrent-load acceptance",
+  "subscriptions": 32,
+  "stories": 200,
+  "events": 1000,
+  "inbox_rows": 6400,
+  "revision_batch_seconds": [
+    0.7732677599415183,
+    0.4078006229829043,
+    0.4048902608919889,
+    0.3735326980240643,
+    0.3777686529792845
+  ],
+  "read_100_seconds": 0.005927507067099214,
+  "coalescing_verified": true
+}

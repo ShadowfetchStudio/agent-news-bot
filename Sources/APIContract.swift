@@ -5,13 +5,13 @@ enum APIContract {
     static let features = Dictionary(uniqueKeysWithValues: [
         "async_fetch", "durable_stories", "source_observations", "story_revisions", "consumer_delivery",
         "consumer_generations", "consumer_leases", "research_library", "editorial_drafts", "research_export",
-        "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history"].map { ($0, 1) })
+        "group_repairs", "worldmonitor_digest", "source_health", "platform_approval", "editorial_brief", "retained_history", "saved_search_alerts"].map { ($0, 1) })
     static let routes: [String: [String]] = [
         "/health": ["GET"], "/v1/capabilities": ["GET"], "/v1/status": ["GET"], "/v1/fresh": ["GET"],
         "/v1/articles/{id}": ["GET"], "/v1/desks": ["GET"], "/v1/sources": ["GET"], "/v1/fetch": ["POST"],
         "/v1/stories/{id}": ["GET"], "/v1/stories/{id}/revisions": ["GET"], "/v1/events": ["GET"],
         "/v1/events/ack": ["POST"], "/v1/consumers": ["GET", "POST"], "/v1/library": ["GET"],
-        "/v1/library/settings": ["GET", "POST"], "/v1/library/editorial": ["GET", "POST"],
+        "/v1/library/settings": ["GET", "POST"], "/v1/library/alerts": ["GET", "POST"], "/v1/library/editorial": ["GET", "POST"],
         "/v1/library/export": ["GET"], "/v1/library/brief": ["GET"], "/v1/library/repairs": ["GET", "POST"]]
     static let errors: [Int: (String, String)] = [
         400: ("invalid_request", "correct_request"), 401: ("unauthorized", "reload_credentials"),
@@ -39,7 +39,7 @@ enum APIContract {
          "authentication": ["scheme": "Bearer", "alternative_header": "X-Agent-Token", "public_routes": ["GET /health"]],
          "limits": ["json_request_bytes": 65536, "response_bytes": 16777216, "fresh_page": 500,
                     "event_page": 500, "library_page": 100, "revision_page": 100, "repair_evidence_bytes": 4194304,
-                    "lease_min_seconds": 10, "lease_max_seconds": 300],
+                    "alert_subscriptions": 32, "alert_page": 100, "lease_min_seconds": 10, "lease_max_seconds": 300],
          "delivery": ["semantics": "at_least_once", "filtered_acknowledgement": false,
                       "commit_before_ack": true, "repair_retry": "same_operation_id_and_request"],
          "limitations": ["automatic_publishing": false, "embedded_worldmonitor_dashboard": false,

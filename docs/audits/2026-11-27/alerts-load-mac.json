@@ -1,0 +1,18 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "fixture": "/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-alert-load-my8fg8b5",
+  "scope": "Synthetic local 32 subscriptions, 200 stories and five revisions each; warm timing, not long-running production or concurrent-load acceptance",
+  "subscriptions": 32,
+  "stories": 200,
+  "events": 1000,
+  "inbox_rows": 6400,
+  "revision_batch_seconds": [
+    0.4591769579856191,
+    0.22314450002158992,
+    0.2619090419902932,
+    0.2658512080088258,
+    0.2561751250177622
+  ],
+  "read_100_seconds": 0.004349416005425155,
+  "coalescing_verified": true
+}

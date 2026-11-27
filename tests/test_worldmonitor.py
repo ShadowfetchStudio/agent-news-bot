@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "RetentionStore", "LibraryStore", "GroupRepairStore", "EditorialBrief", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "SourceHealth", "APIContract", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "RetentionStore", "AlertStore", "LibraryStore", "GroupRepairStore", "EditorialBrief", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -691,6 +691,13 @@ def journal_runtime(request, tmp_path):
         def op(self, value):
             data = tmp_path / "operation.json"; data.write_text(json.dumps(value))
             return swift(binary, "library-op", db, data)
+        def alerts(self, query=None): return self.op({"op":"alerts","query":query or {}})
+        def alert_change(self, change):
+            result=self.op({"op":"alert-change","change":change})
+            if result.get("error"):
+                from agent_newsbot.library import LibraryConflict
+                raise {"conflict":LibraryConflict,"invalid":ValueError,"missing":LookupError}[result["error"]](result.get("message","missing"))
+            return result
         def library(self, query=None): return self.op({"op": "search", "query": query or {}})
         def editorial(self, sid): return self.op({"op": "editorial", "id": sid})
         def save_editorial(self, sid, change): return self.op({"op": "save", "id": sid, "change": change})

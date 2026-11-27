@@ -12,6 +12,7 @@ An event is eligible only when all of these hold in the write transaction:
 - The story is not bookmarked.
 - Its revision is not referenced by saved draft `source_revision`, aggregate `approved_revision` or any platform's `approved_revision`.
 - It is not a `group_repaired` event.
+- No unread saved-search inbox item references its sequence. Marking a match seen releases only this extra hold.
 
 A lagging consumer can intentionally prevent all pruning. Stop/reconcile obsolete workers and explicitly reset their cursors only if you intend to skip that backlog; maintenance never does this for you. Active leases are preserved. A worker can continue processing events after its acknowledged cursor while older acknowledged events are archived.
 

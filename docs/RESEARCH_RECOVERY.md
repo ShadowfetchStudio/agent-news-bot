@@ -2,7 +2,7 @@
 
 The recovery tool saves the research journal, optional freshness cache and optional source-health history. It verifies SHA-256 hashes, byte counts, SQLite integrity, supported table layouts, JSON records, references and consumer checkpoints before restoring into a **new directory**. It never overwrites an existing directory, even an empty one. The running library is not replaced or restarted by these commands.
 
-Included in `stories.sqlite`: stories, original provider observations, correction/event history, group-repair receipts, identity aliases, editorial drafts/notes/approval state, bookmarks, saved searches, source mutes and consumer checkpoints. `seen.sqlite` and `source-health.sqlite` are included when present. Research text and worker lease tokens in the backup are private data; keep the backup private.
+Included in `stories.sqlite`: stories, original provider observations, correction/event history, group-repair receipts, identity aliases, editorial drafts/notes/approval state, bookmarks, saved searches, saved-search alert subscriptions/inbox/read positions and version clock, source mutes and consumer checkpoints. `seen.sqlite` and `source-health.sqlite` are included when present. Research text and worker lease tokens in the backup are private data; keep the backup private.
 
 This is a **research backup**, not a full computer or application configuration backup. It excludes bridge tokens, Keychain secrets, Mac preferences, Linux config, exported files/snapshots, agent inboxes/outboxes and binaries. Save those separately using your normal private backup process. Media rights and editorial approval do not change through recovery.
 

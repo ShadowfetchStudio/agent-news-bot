@@ -33,6 +33,7 @@ struct LibraryView: View {
     @State private var rows: [LibraryItem] = []
     @State private var preferences: [LibraryPreference] = []
     @State private var selected: String?
+    @State private var showAlerts = false
     private var filters: [String: String] {
         ["q": q, "entity": entity, "source": source, "desk": desk, "provider": provider, "status": status,
          "sort": sort, "bookmarked": bookmarked ? "true" : "false", "include_muted": includeMuted ? "true" : "false", "include_merged": includeMerged ? "true" : "false"]
@@ -61,7 +62,7 @@ struct LibraryView: View {
                 Spacer()
                 Menu("Watchlists") {
                     ForEach(preferences.filter { $0.kind == "search" }) { item in
-                        Button(item.name) { apply(item.filters) }
+                        Button(item.name) { apply(item.filters); watchName = item.name }
                         Button("Delete \(item.name)") { preference(kind: "search", name: item.name, value: NSNull()) }
                     }
                 }
@@ -72,6 +73,13 @@ struct LibraryView: View {
                         Button("Unmute \(item.name)") { preference(kind: "mute", name: item.name, value: NSNull()) }
                     }
                 }
+            }
+            HStack {
+                Button("Watch for changes") { enableAlerts() }.disabled(busy || includeMerged || watchName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .help("Watch active story revisions. Turn off Include merged history to enable alerts.")
+                Button("Alerts inbox") { showAlerts = true }
+                Button("Review queue") { apply(["status":"needs_review","sort":"priority","include_muted":"true"]) }
+                Text("Alerts start with future matching revisions; approval review is separate.").font(.caption).foregroundStyle(.secondary)
             }
             Text("Priority highlights source breadth, corrections and disagreement for review. It is not a truth or credibility score.").font(.caption).foregroundStyle(.secondary)
             if !message.isEmpty { Text(message).font(.callout).textSelection(.enabled) }
@@ -91,6 +99,7 @@ struct LibraryView: View {
                 Button("Open story and drafts") { if let selected { editorID = selected } }.disabled(selected == nil)
             }
         }.padding(20).frame(minWidth: 1000, minHeight: 650)
+        .sheet(isPresented:$showAlerts) { AlertsView(store:store) }
         .onChange(of: filterKey) { _, _ in offset = 0 }
         .task(id: filterKey + ":\(offset):\(refresh)") { await load() }
         .sheet(item: Binding(get: { editorID.map { EditorSelection(id: $0) } }, set: { editorID = $0?.id }), onDismiss: { refresh += 1 }) { item in
@@ -103,6 +112,23 @@ struct LibraryView: View {
     @State private var repairID: String?
     @State private var editorID: String?
     private struct EditorSelection: Identifiable { let id: String }
+    private func enableAlerts() {
+        guard !busy else { return }
+        busy=true
+        let name=watchName.trimmingCharacters(in:.whitespacesAndNewlines)
+        let values=filters.filter { AlertSchema.filterKeys.contains($0.key) }, db=store
+        Task {
+            defer { busy=false }
+            do {
+                try await Task.detached {
+                    let subscriptions=try db.alerts()["subscriptions"] as? [[String:Any]] ?? []
+                    let previous=subscriptions.first { $0["name"] as? String == name }
+                    _=try db.alertChange(["action":"subscribe","name":name,"expected_version":previous?["version"] ?? 0,"filters":values,"enabled":true])
+                }.value
+                message="Watching future matching revisions for \(name). Open Alerts inbox to review them."
+            } catch { message="Could not enable this alert. Use a name up to 80 characters and reload before retrying." }
+        }
+    }
     private func apply(_ values: [String: String]) {
         q = values["q"] ?? ""; entity = values["entity"] ?? ""; source = values["source"] ?? ""
         desk = values["desk"] ?? ""; provider = values["provider"] ?? ""; status = values["status"] ?? ""

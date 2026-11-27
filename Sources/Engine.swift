@@ -526,6 +526,7 @@ final class NewsEngine: ObservableObject {
         - `GET /v1/status` — snapshot status
         - `POST /v1/fetch` — request refresh (202 accepted, 409 already running); poll /v1/status fetch_job for completion
 
+        When `saved_search_alerts: 1` is advertised, `/v1/library/alerts` offers future-only subscriptions and a coalesced local inbox. Read requests do not mark seen; explicit `mark_seen` uses the exact matched sequence and never approves a draft or advances an agent cursor. Use `/v1/library?status=needs_review&include_muted=true&sort=priority` for correction review. Inbox matches are not a lossless consumer stream.
         Errors preserve `error` and add versioned `error_detail` codes/recovery guidance. Do not blindly retry writes after ambiguous failures. Reload consumer/editorial state on 409. Repair retries require the same operation ID and identical request. Use `GET /v1/consumers` for generation/lag/lease status; active leases require X-Consumer-Lease. Commit every delivered event before acknowledging. Capabilities describe support, not source/agent readiness; inspect coverage separately. Empty output does not prove coverage is current. No request automatically authorizes publication or clears media rights.
 
         Do not invent URLs. Prefer the tweet and hashtags fields when drafting social posts. Never print the bearer token in public channels.

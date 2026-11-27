@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     library.add_argument("--bookmarked", action="store_true")
     library.add_argument("--include-muted", action="store_true")
     library.add_argument("--include-merged", action="store_true")
+    alerts = sub.add_parser("alerts", help="Read the local saved-search inbox or apply an explicit subscription/seen command")
+    alerts.add_argument("--changes")
+    for name in ("name", "unread", "limit", "offset"): alerts.add_argument("--" + name)
     brief = sub.add_parser("brief", help="Read a source-linked editorial brief from retained research; no fetching or model call")
     brief.add_argument("id")
     editorial = sub.add_parser("editorial", help="Read editorial state or save an explicit revision-bound change file")
@@ -82,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.cmd in ("library", "brief", "editorial", "preferences", "export-research", "consumers", "repairs"):
+    if args.cmd in ("library", "alerts", "brief", "editorial", "preferences", "export-research", "consumers", "repairs"):
         from pathlib import Path
         import sqlite3
         from .config import HOME
@@ -127,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
                     except (OSError, http.client.HTTPException) as exc:
                         raise ValueError("Repair service unavailable or connection interrupted. Start the service, check the operation receipt, then retry the SAME change file.") from exc
                     finally: connection.close()
+            elif args.cmd == "alerts":
+                result = journal.alert_change(change) if change is not None else journal.alerts({key:getattr(args,key) for key in ("name","unread","limit","offset") if getattr(args,key) is not None})
             elif args.cmd == "brief":
                 result = journal.research_brief(args.id)
             elif args.cmd == "editorial":

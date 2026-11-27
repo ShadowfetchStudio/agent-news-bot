@@ -87,3 +87,7 @@ The CLI reads/writes the same SQLite journal as the service and applies the same
 ## Manual grouping repairs
 
 Select **Repair grouping…** to split source reports or merge into a previewed destination. **Include merged history** exposes retained old IDs and drafts; they cannot be exported as active stories. The Story tab shows IDs, repair reasons and related IDs. See [the complete repair contract, API and CLI](GROUP_REPAIRS.md).
+
+## Saved-search notifications and review queue
+
+[Saved-search alerts](SAVED_SEARCH_ALERTS.md) add an opt-in future-revision subscription and persistent local inbox to named library filters. The native Review queue shortcut shows changed approved drafts, including muted sources; reading an alert never approves a draft. The two workflows have independent durable state.

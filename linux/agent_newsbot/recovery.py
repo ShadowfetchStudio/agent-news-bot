@@ -38,7 +38,7 @@ SCHEMAS = {
     },
     "source-health.sqlite": {"source_health": "id payload"},
 }
-OPTIONAL_SCHEMAS = {"stories.sqlite": {"journal_retention": "id payload"}}
+OPTIONAL_SCHEMAS = {"stories.sqlite": {"journal_retention": "id payload", "watch_clock": "id value", "watch_alerts": "name payload", "watch_matches": "alert story_id seq revision subscription_version seen_seq"}}
 EXCLUDED = ["bridge credentials", "Keychain secrets", "application preferences and Linux config",
             "exported files and snapshots", "agent inboxes/outboxes", "application binaries"]
 
@@ -120,6 +120,26 @@ def inspect(path: Path, name: str, deadline: float):
                     latest = db.execute("SELECT coalesce(max(seq),0) FROM events").fetchone()[0]
                     if type(floor) is not int or not 0 <= floor <= latest or db.execute("SELECT 1 FROM consumers WHERE cursor<?", (floor,)).fetchone():
                         raise RecoveryError("Invalid retention boundary or consumer checkpoint")
+            if "watch_alerts" in tables:
+                if "watch_clock" not in tables:
+                    raise RecoveryError("Missing saved-search alert clock")
+                rows = db.execute("SELECT id,value FROM watch_clock").fetchall()
+                subscriptions=db.execute("SELECT name,payload FROM watch_alerts").fetchall()
+                if len(subscriptions)>32:
+                    raise RecoveryError("Too many saved-search subscriptions")
+                for alert_name,raw in subscriptions:
+                    alert=json.loads(raw)
+                    valid_filters=alert.get("filters")
+                    if not isinstance(alert_name,str) or not 1<=len(alert_name)<=80 or type(alert.get("version")) is not int or alert["version"]<1 or type(alert.get("enabled")) is not bool or type(alert.get("start_seq")) is not int or alert["start_seq"]<0 or not isinstance(valid_filters,dict) or set(valid_filters)-{"q","entity","desk","source","provider","status","bookmarked","include_muted"} or any(not isinstance(v,str) or len(v)>300 for v in valid_filters.values()):
+                        raise RecoveryError("Invalid saved-search subscription")
+                    if valid_filters.get("status", "") not in ("", "unreviewed", "draft", "needs_review", "approved", "rejected") or any(valid_filters.get(k,"false") not in ("true","false") for k in ("bookmarked","include_muted")):
+                        raise RecoveryError("Invalid saved-search filter value")
+                maximum = db.execute("SELECT coalesce(max(json_extract(payload,'$.version')),0) FROM watch_alerts").fetchone()[0]
+                if len(rows)>1 or (rows and (rows[0][0]!=1 or type(rows[0][1]) is not int or rows[0][1]<maximum)) or (not rows and maximum):
+                    raise RecoveryError("Invalid saved-search alert clock")
+            if "watch_matches" in tables:
+                if "watch_alerts" not in tables or db.execute("SELECT 1 FROM watch_matches m LEFT JOIN watch_alerts a ON a.name=m.alert LEFT JOIN stories s ON s.id=m.story_id WHERE a.name IS NULL OR s.id IS NULL OR typeof(m.seq)!='integer' OR m.seq<1 OR typeof(m.seen_seq)!='integer' OR m.seen_seq<0 OR m.seen_seq>m.seq OR typeof(m.revision)!='integer' OR m.revision<1 OR typeof(m.subscription_version)!='integer' OR m.subscription_version<1 OR m.subscription_version>(SELECT value FROM watch_clock WHERE id=1) OR (m.seen_seq<m.seq AND NOT EXISTS(SELECT 1 FROM events e WHERE e.seq=m.seq AND e.story_id=m.story_id AND json_extract(e.payload,'$.revision')=m.revision)) LIMIT 1").fetchone():
+                    raise RecoveryError("Invalid saved-search alert reference")
             # Referential checks that SQLite foreign keys cannot cover in this schema.
             for table in ("members", "events", "identity_aliases", "editorial"):
                 if db.execute(f'SELECT 1 FROM "{table}" r LEFT JOIN stories s ON s.id=r.story_id WHERE s.id IS NULL LIMIT 1').fetchone():

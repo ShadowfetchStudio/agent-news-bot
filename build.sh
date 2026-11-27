@@ -66,7 +66,7 @@ cp "$PROJECT_DIR/linux/agent_newsbot/vendor/"*-LICENSE.txt "$APP_DIR/Contents/Re
 for helper in recovery maintenance retention; do
     cp "$PROJECT_DIR/linux/agent_newsbot/$helper.py" "$APP_DIR/Contents/Resources/"
 done
-cp "$PROJECT_DIR/docs/RESEARCH_RECOVERY.md" "$PROJECT_DIR/docs/HISTORY_RETENTION.md" "$APP_DIR/Contents/Resources/"
+cp "$PROJECT_DIR/docs/RESEARCH_RECOVERY.md" "$PROJECT_DIR/docs/HISTORY_RETENTION.md" "$PROJECT_DIR/docs/SAVED_SEARCH_ALERTS.md" "$APP_DIR/Contents/Resources/"
 
 echo "==> Compiling ($ARCH)"
 SWIFT_SOURCES=()

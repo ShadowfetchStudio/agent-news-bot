@@ -32,6 +32,7 @@ final class StoryStore: @unchecked Sendable {
         ] { try run(db, sql) }
         try run(db, ConsumerSchema.sql)
         try run(db, RetentionSchema.sql)
+        for sql in AlertSchema.sql { try run(db, sql) }
         try run(db, "CREATE TABLE IF NOT EXISTS group_repairs(id TEXT PRIMARY KEY,request TEXT NOT NULL,result TEXT NOT NULL,created REAL NOT NULL)")
         try run(db, "BEGIN IMMEDIATE")
         do {
@@ -235,6 +236,7 @@ final class StoryStore: @unchecked Sendable {
                 }
                 try run(db, "INSERT OR REPLACE INTO stories VALUES (?,?,?)", [id, try encode(story), String(now.timeIntervalSince1970)])
             }
+            try recordAlerts(db, storyIDs: changed.map(\.id))
             return changed
         }
     }

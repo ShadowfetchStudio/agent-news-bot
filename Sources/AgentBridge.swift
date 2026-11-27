@@ -337,11 +337,17 @@ final class AgentBridge: @unchecked Sendable {
 
     private func libraryResponse(_ path: String, method: String, query: [String: String], body: [String: Any]) -> (Int, Data) {
         guard let stories else { return json(503, ["error": "story storage unavailable"]) }
-        let allowed = ["/v1/library", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs"]
+        let allowed = ["/v1/library", "/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/export", "/v1/library/brief", "/v1/library/repairs"]
         guard allowed.contains(path) else { return json(404, ["error": "not found"]) }
-        guard method == "GET" || (method == "POST" && ["/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
+        guard method == "GET" || (method == "POST" && ["/v1/library/alerts", "/v1/library/settings", "/v1/library/editorial", "/v1/library/repairs"].contains(path)) else { return json(405, ["error": "method not allowed"]) }
         do {
             switch path {
+            case "/v1/library/alerts":
+                if method == "POST" {
+                    guard query.isEmpty else { throw LibraryFailure.invalid("alerts POST does not accept query parameters") }
+                    return json(200, try stories.alertChange(body))
+                }
+                return json(200, try stories.alerts(query))
             case "/v1/library/repairs":
                 if method == "POST" {
                     guard query.isEmpty else { throw LibraryFailure.invalid("repair POST does not accept query parameters") }

@@ -214,6 +214,12 @@ import Security
         if args[1] == "library-op" {
             let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[3]))) as! [String: Any]
             switch value["op"] as? String {
+            case "alerts": try output(try store.alerts(value["query"] as? [String: String] ?? [:]))
+            case "alert-change":
+                do { try output(try store.alertChange(value["change"] as! [String: Any])) }
+                catch LibraryFailure.conflict(let message) { try output(["error":"conflict","message":message]) }
+                catch LibraryFailure.invalid(let message) { try output(["error":"invalid","message":message]) }
+                catch LibraryFailure.missing { try output(["error":"missing"]) }
             case "repair":
                 do { try output(try store.repairGroup(value["change"] as! [String: Any])) }
                 catch LibraryFailure.conflict(let message) { try output(["error": "conflict", "message": message]) }
