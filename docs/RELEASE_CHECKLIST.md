@@ -290,3 +290,6 @@ The editorial export checkbox is closed at its stated manual-handoff scope. Pers
 
 
 Final brief-batch follow-up: the ordinary Python editorial GET now also reads story and draft state in a single transaction. A controlled concurrent writer regression verifies that old story data cannot be paired with a newer approval; both that case and the export-snapshot case passed on Mac and native Linux. Native Swift reads already use the common transactional store. The universal macOS app also compiled successfully; its architecture/signature checks are separate from native Intel execution and notarization.
+
+
+CI portability follow-up: the first brief commit's Mac tests passed, but the older hosted Swift compiler could not type-check the nested source-button expression. Extracted a small source view with a Boolean expansion state and explicit accessibility text, reducing the compiler workload. Final CI acceptance remains required for the follow-up commit.
