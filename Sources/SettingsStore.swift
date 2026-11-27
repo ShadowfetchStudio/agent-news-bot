@@ -12,6 +12,7 @@ final class SettingsStore: ObservableObject {
     @Published var maxPerDesk: Int
     @Published var weatherCity: String
     @Published var hermesAPIURL: String
+    @Published var hermesModel: String
     @Published var hermesUseCLI: Bool
     @Published var openClawURL: String
     @Published var bridgePort: Int
@@ -33,6 +34,7 @@ final class SettingsStore: ObservableObject {
         maxPerDesk = defaults.object(forKey: "maxPerDesk") as? Int ?? 20
         weatherCity = defaults.string(forKey: "weatherCity") ?? "New York"
         hermesAPIURL = defaults.string(forKey: "hermesAPIURL") ?? "http://127.0.0.1:8642"
+        hermesModel = defaults.string(forKey: "hermesModel") ?? "hermes-agent"
         hermesUseCLI = defaults.object(forKey: "hermesUseCLI") as? Bool ?? true
         openClawURL = defaults.string(forKey: "openClawURL") ?? "ws://127.0.0.1:18789"
         bridgePort = defaults.object(forKey: "bridgePort") as? Int ?? 18765
@@ -55,6 +57,7 @@ final class SettingsStore: ObservableObject {
         defaults.set(maxPerDesk, forKey: "maxPerDesk")
         defaults.set(weatherCity, forKey: "weatherCity")
         defaults.set(hermesAPIURL, forKey: "hermesAPIURL")
+        defaults.set(hermesModel, forKey: "hermesModel")
         defaults.set(hermesUseCLI, forKey: "hermesUseCLI")
         defaults.set(openClawURL, forKey: "openClawURL")
         defaults.set(bridgePort, forKey: "bridgePort")

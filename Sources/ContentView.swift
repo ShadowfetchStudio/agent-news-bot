@@ -210,9 +210,9 @@ struct ContentView: View {
                         }
                         HStack {
                             Button("Send to Hermes") { Task { await engine.sendToHermes([article]) } }
-                                .disabled(!engine.hermes.ready)
+                                .disabled(engine.agentTestRunning || !engine.hermes.canSend)
                             Button("Send to OpenClaw") { Task { await engine.sendToOpenClaw([article]) } }
-                                .disabled(!engine.openclaw.ready)
+                                .disabled(engine.agentTestRunning || !engine.openclaw.canSend)
                         }
                         if !engine.lastAgentReply.isEmpty {
                             Text("Last agent reply")
@@ -256,7 +256,7 @@ struct ContentView: View {
             } label: {
                 Label("Send desk to Hermes", systemImage: "paperplane")
             }
-            .disabled(!engine.hermes.ready || engine.filtered.isEmpty)
+            .disabled(engine.agentTestRunning || !engine.hermes.canSend || engine.filtered.isEmpty)
             Button(action: engine.revealExports) {
                 Label("Exports", systemImage: "folder")
             }

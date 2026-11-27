@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import CryptoKit
 
 private final class LockedSnapshot: @unchecked Sendable {
     private let lock = NSLock()
@@ -65,6 +66,8 @@ final class NewsEngine: ObservableObject {
     @Published var openclaw = AgentStatus(kind: .openclaw, label: "OpenClaw", detail: "Checking…", ready: false)
     @Published var bridgeReady = false
     @Published var lastAgentReply = ""
+    @Published private(set) var agentTestRunning = false
+    private var verifiedAgents: [AgentKind: (String, Date)] = [:]
     @Published var search = ""
 
     let settings = SettingsStore.shared
@@ -286,11 +289,15 @@ final class NewsEngine: ObservableObject {
         let payload = items ?? (selected.map { [$0] } ?? Array(articles.prefix(8)))
         guard !payload.isEmpty else { return }
         status = "Sending \(payload.count) item(s) to Hermes…"
+        let identity = agentIdentity(.hermes)
         do {
             let reply = try await HermesClient.send(articles: payload, settings: settings)
             lastAgentReply = reply
+            if identity == agentIdentity(.hermes) { recordAgentReply(.hermes) }
             status = "Hermes accepted \(payload.count) item(s)"
         } catch {
+            verifiedAgents[.hermes] = nil; hermes.ready = false
+            hermes.detail = "Reply failed: \(error.localizedDescription)"
             status = "Hermes send failed: \(error.localizedDescription)"
         }
     }
@@ -299,18 +306,78 @@ final class NewsEngine: ObservableObject {
         let payload = items ?? (selected.map { [$0] } ?? Array(articles.prefix(8)))
         guard !payload.isEmpty else { return }
         status = "Sending \(payload.count) item(s) to OpenClaw…"
+        let identity = agentIdentity(.openclaw)
         do {
             let reply = try await OpenClawClient.send(articles: payload, settings: settings)
             lastAgentReply = reply
+            if identity == agentIdentity(.openclaw) { recordAgentReply(.openclaw) }
             status = "OpenClaw accepted \(payload.count) item(s)"
         } catch {
+            verifiedAgents[.openclaw] = nil; openclaw.ready = false
+            openclaw.detail = "Reply failed: \(error.localizedDescription)"
             status = "OpenClaw send failed: \(error.localizedDescription)"
         }
     }
 
     func refreshAgents() async {
-        hermes = await HermesClient.probe(settings: settings)
-        openclaw = await OpenClawClient.probe(settings: settings)
+        let hermesIdentity = agentIdentity(.hermes), clawIdentity = agentIdentity(.openclaw)
+        let hermesResult = await HermesClient.probe(settings: settings)
+        let clawResult = await OpenClawClient.probe(settings: settings)
+        if hermesIdentity == agentIdentity(.hermes) { hermes = hermesResult }
+        if clawIdentity == agentIdentity(.openclaw) { openclaw = clawResult }
+        applyVerifiedReply(.hermes); applyVerifiedReply(.openclaw)
+    }
+
+    private func agentIdentity(_ kind: AgentKind) -> String {
+        let values = kind == .hermes
+            ? [settings.hermesAPIURL, settings.hermesModel, settings.hermesToken, String(settings.hermesUseCLI), HermesClient.which("hermes") ?? ""]
+            : [settings.openClawURL, settings.openClawToken, HermesClient.which("openclaw") ?? ""]
+        return SHA256.hash(data: Data(values.joined(separator: "\u{0}").utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func invalidateAgent(_ kind: AgentKind) {
+        verifiedAgents[kind] = nil
+        var value = kind == .hermes ? hermes : openclaw
+        value.ready = false; value.canSend = false
+        value.detail = "Settings changed or test in progress. Check the connection or test a reply."
+        if kind == .hermes { hermes = value } else { openclaw = value }
+    }
+
+    private func recordAgentReply(_ kind: AgentKind) {
+        verifiedAgents[kind] = (agentIdentity(kind), Date())
+        if kind == .hermes { hermes.canSend = true } else { openclaw.canSend = true }
+        applyVerifiedReply(kind)
+    }
+
+    private func applyVerifiedReply(_ kind: AgentKind) {
+        guard let (identity, date) = verifiedAgents[kind], identity == agentIdentity(kind) else { return }
+        var value = kind == .hermes ? hermes : openclaw
+        guard value.canSend else { return }
+        value.ready = true
+        value.detail = "Reply verified at \(date.formatted(date: .omitted, time: .standard)). Re-test after changing agent configuration."
+        if kind == .hermes { hermes = value } else { openclaw = value }
+    }
+
+    func testAgent(_ kind: AgentKind) async {
+        guard !agentTestRunning else { return }
+        agentTestRunning = true
+        defer { agentTestRunning = false }
+        let identity = agentIdentity(kind)
+        invalidateAgent(kind)
+        do {
+            if kind == .hermes { try await HermesClient.test(settings: settings) }
+            else { try await OpenClawClient.test(settings: settings) }
+            guard identity == agentIdentity(kind) else { status = "Agent settings changed during the test. Run it again."; return }
+            await refreshAgents()
+            guard identity == agentIdentity(kind) else { status = "Agent settings changed during the test. Run it again."; return }
+            recordAgentReply(kind)
+            status = "\(kind.rawValue) connection test passed. No story material was sent."
+        } catch {
+            var value = kind == .hermes ? hermes : openclaw
+            value.ready = false; value.detail = "Test failed: \(error.localizedDescription)"
+            if kind == .hermes { hermes = value } else { openclaw = value }
+            status = value.detail
+        }
     }
 
     func revealExports() {

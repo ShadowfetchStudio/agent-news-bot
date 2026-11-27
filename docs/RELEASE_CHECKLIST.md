@@ -7,13 +7,13 @@ Scope: repair every finding in the November 27 four-perspective audit, implement
 The [current-source follow-up audit](audits/2026-11-27/reaudit/AUDIT.md) found nine additional defects after the original repair batches. These are separate from B01–B14; passing those regressions does not close the findings below.
 
 - [x] R01: fail visibly and preserve data when native bridge credentials cannot be persisted; stable cached credential and explicit rotation.
-- [ ] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
+- [x] R02: distinguish agent detection from compatible readiness and reject invalid/empty completion payloads.
 - [ ] R03: prevent unrelated events with similar wording from silently merging; preserve recoverable group identities/history.
 - [x] R04: reject non-HTTP(S) news links at ingestion and every desktop/export boundary.
 - [x] R05: enforce each desk's display cap after fresh/carry-over merging and restoration.
 - [x] R06: bound Linux HTTP connections, header/body deadlines and stalled writes.
 - [x] R07: return a controlled unauthorized response for malformed/non-ASCII credentials.
-- [ ] R08: enforce byte and total-time limits while receiving every provider response, not after buffering.
+- [x] R08: enforce byte and total-time limits while receiving every provider response, not after buffering.
 - [x] R09: surface native snapshot/export persistence failures without losing the preceding valid snapshot.
 
 Follow-up evidence: current Mac suite 127 passed; synchronized native Pop!_OS suite 80 passed/47 Mac-only skips; Apple Silicon build and strict ad-hoc signature verification passed. New isolated fixtures reproduce R01–R08 (R04's desktop dispatch is code-confirmed, not executed; R08 total-time risk is code-confirmed). R09 is code-confirmed. The live 54-feed sweep returned 48 feeds with parseable entries, five request/HTTP failures and one valid empty feed. This remains a development checkout, not the final published release.
@@ -181,3 +181,16 @@ Final installer acceptance also checks the process command line uses the selecte
 - Validation: full macOS suite **174 passed**; isolated native Pop!_OS suite **107 passed / 67 native-Mac skips**. Apple Silicon build completed without warnings and passed strict ad-hoc signature verification. This targeted UI check does not close the full keyboard/VoiceOver/installer acceptance items.
 
 R02, the manual repair portion of R03, and direct-provider bounds in R08 remain open, along with the wider setup, maintenance, real integrations and final distribution checklist. No final release assets have been published.
+
+
+## Agent readiness and provider transport repair batch
+
+- R02: Hermes discovery now checks a bounded, authenticated `/v1/models` response and the configured model. An unrelated health response, missing model or CLI executable alone cannot claim a verified reply. Settings offers discovery without inference and an explicit fixed-prompt reply test; successful replies are timestamped for the current configuration/session. Model/URL/mode/credential edits invalidate verification. CLI handoffs reject empty output, API handoffs require nonempty assistant text with a completed stop result, and error/cancelled/length responses are not successful handoffs. Settings explains saved credentials and possible model charges. OpenClaw gateway reachability remains distinct from CLI handoff support.
+- Added a configurable Hermes model and normalized origin versus `/v1` base URLs. Removed the stale README claims that a local Hermes installation had been detected, that gateway-only OpenClaw handoff worked, and that startup installed skills.
+- R08: all native direct-provider calls use decoded streaming limits (4 MiB) and URLSession resource deadlines. Linux direct providers use owned per-request workers with decoded streaming limits and a parent deadline covering DNS, redirects, headers and body; timed-out workers are killed/reaped. Normal direct deadlines are 14 seconds, with existing 8/12-second source-specific settings. Five redirects maximum; no HTTPS downgrade. Agent requests refuse redirects, use separate 256 KiB discovery/2 MiB reply bounds and 3/120-second deadlines. World Monitor keeps its existing 4 MiB/20-second boundary.
+- Real HTTP fixtures cover unrelated/empty/invalid model lists; custom model and `/v1` base; incomplete/cancelled/error/empty/non-assistant completions; explicit acknowledgement matching; actionable 401/403/404/429 without echoing provider error bodies; 6 MiB streaming and compressed payloads; slow trickled bodies; redirect loops; retained Retry-After; and timeout worker reaping. Existing real 200/304 feed-cache tests continue to pass.
+- Full validation: **204 tests passed on macOS; 113 passed / 91 native-Mac skips on Pop!_OS**. Final Apple Silicon app builds without warnings and passes strict ad-hoc signature verification. A build that overlapped a UI source edit correctly failed and was replaced by the final stable-source build.
+- Isolated actual Settings walkthrough at 520 x 592: compatible model list displayed Reply not tested; Test Hermes reply against a local fixture displayed a verified timestamp; editing the model immediately invalidated that state; a second fixture reply of `{}` displayed an explicit failure. Fixture request log confirmed exactly two fixed prompts and no story material. Test app/server stopped and isolated preferences removed. Evidence: `/var/folders/4m/7t5q5j0x6fz8ybxfyr6197nr0000gn/T/anb-agent-ui-rg3kva10/`.
+- Actual Hermes/OpenClaw executables were not found on the checked Mac or Pop!_OS PATHs; the usual Mac Hermes location was absent. Controlled protocol/UI checks are not a live model/provider acceptance. That limitation remains in the final integration gate.
+
+The manual repair portion of R03 remains open. Source backoff/circuit breakers, setup, backup/restore/retention, deeper editorial work, complete release documentation and final distributable publication remain part of the goal.

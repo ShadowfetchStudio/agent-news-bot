@@ -3,54 +3,52 @@ import Foundation
 enum HermesClient {
     @MainActor
     static func probe(settings: SettingsStore) async -> AgentStatus {
-        let cli = which("hermes")
-        var apiReady = false
-        if let base = URL(string: settings.hermesAPIURL) {
-            let health = base.appendingPathComponent("health")
-            if let _ = try? await Net.data(from: health, timeout: 2, accept: "application/json") {
-                apiReady = true
-            } else {
-                let alt = base.appendingPathComponent("v1/models")
-                var request = URLRequest(url: alt, timeoutInterval: 2)
-                request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
-                if !settings.hermesToken.isEmpty {
-                    request.setValue("Bearer \(settings.hermesToken)", forHTTPHeaderField: "Authorization")
-                }
-                if let (_, response) = try? await URLSession.shared.data(for: request),
-                   let http = response as? HTTPURLResponse,
-                   (200..<300).contains(http.statusCode) {
-                    apiReady = true
-                }
+        if settings.hermesUseCLI, let cli = which("hermes") {
+            return AgentStatus(kind: .hermes, label: "Hermes CLI", detail: "Detected at \(cli). Model/authentication not tested.", ready: false, canSend: true)
+        }
+        do {
+            var request = try apiRequest(settings: settings, path: "models", timeout: 3)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, _) = try await HTTPTransport.receive(request, timeout: 3, maxBytes: 256 * 1024, redirects: false)
+            let value = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard value?["object"] as? String == "list", let models = value?["data"] as? [[String: Any]],
+                  models.contains(where: { $0["id"] as? String == settings.hermesModel }) else { throw Failure.models }
+            return AgentStatus(kind: .hermes, label: "Hermes API", detail: "Compatible model list; \(settings.hermesModel). Reply not tested.", ready: false, canSend: true)
+        } catch {
+            return AgentStatus(kind: .hermes, label: "Hermes API", detail: error.localizedDescription, ready: false)
+        }
+    }
+
+    enum Failure: LocalizedError {
+        case models, completion, incomplete(String), empty, testReply
+        var errorDescription: String? {
+            switch self {
+            case .models: return "The API did not advertise the configured model in a compatible model list. Check the model name and base URL."
+            case .completion: return "The API returned no valid completed assistant reply. Check agent/provider configuration."
+            case .incomplete(let text): return "Agent returned an incomplete reply; review before retrying: \(text)"
+            case .empty: return "Agent exited without a reply. Check its model and authentication configuration."
+            case .testReply: return "Agent replied but did not pass the connection test. Inspect its configuration and try again."
             }
         }
+    }
 
-        if cli != nil && settings.hermesUseCLI {
-            return AgentStatus(
-                kind: .hermes,
-                label: "Hermes CLI",
-                detail: apiReady ? "CLI + API \(settings.hermesAPIURL)" : cli!,
-                ready: true
-            )
-        }
-        if apiReady {
-            return AgentStatus(kind: .hermes, label: "Hermes API", detail: settings.hermesAPIURL, ready: true)
-        }
+    static let testPrompt = "Connection test only. Reply with exactly NEWSBOT_CONNECTION_OK and nothing else. Do not use tools, read files, browse, publish, or send messages."
 
-        return AgentStatus(
-            kind: .hermes,
-            label: "Hermes",
-            detail: "Not detected. Install Hermes or start `hermes gateway`.",
-            ready: false
-        )
+    @MainActor
+    static func test(settings: SettingsStore) async throws {
+        let reply = try await sendPrompt(testPrompt, settings: settings)
+        guard reply.trimmingCharacters(in: .whitespacesAndNewlines) == "NEWSBOT_CONNECTION_OK" else { throw Failure.testReply }
+    }
+
+    @MainActor
+    static func sendPrompt(_ prompt: String, settings: SettingsStore) async throws -> String {
+        if settings.hermesUseCLI, let path = which("hermes") { return try await runCLI(path: path, prompt: prompt) }
+        return try await runAPI(prompt: prompt, settings: settings)
     }
 
     @MainActor
     static func send(articles: [Article], settings: SettingsStore) async throws -> String {
-        let body = brief(articles)
-        if settings.hermesUseCLI, let path = which("hermes") {
-            return try await runCLI(path: path, prompt: body)
-        }
-        return try await runAPI(prompt: body, settings: settings)
+        try await sendPrompt(brief(articles), settings: settings)
     }
 
     static func brief(_ articles: [Article]) -> String {
@@ -83,44 +81,47 @@ enum HermesClient {
     }
 
     private static func runCLI(path: String, prompt: String) async throws -> String {
-        try await AgentProcess.run(path: path, arguments: ["chat", "-Q", "-q", prompt, "--max-turns", "4"])
+        let reply = try await AgentProcess.run(path: path, arguments: ["chat", "-Q", "-q", prompt, "--max-turns", "4"])
+        guard !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.empty }
+        return reply
     }
 
     @MainActor
     private static func runAPI(prompt: String, settings: SettingsStore) async throws -> String {
-        guard let base = URL(string: settings.hermesAPIURL) else {
-            throw URLError(.badURL)
-        }
-        let url = base.appendingPathComponent("v1/chat/completions")
-        var request = URLRequest(url: url, timeoutInterval: 120)
+        var request = try apiRequest(settings: settings, path: "chat/completions", timeout: 120)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if !settings.hermesToken.isEmpty {
-            request.setValue("Bearer \(settings.hermesToken)", forHTTPHeaderField: "Authorization")
-        }
         let payload: [String: Any] = [
-            "model": "hermes-agent",
+            "model": settings.hermesModel,
+            "stream": false,
             "messages": [["role": "user", "content": prompt]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 120
-        configuration.timeoutIntervalForResource = 120
-        let session = URLSession(configuration: configuration, delegate: NoAgentRedirects(), delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        var data = Data()
-        for try await byte in bytes {
-            data.append(byte)
-            if data.count > 2 * 1024 * 1024 { throw URLError(.dataLengthExceedsMaximum) }
-        }
+        let (data, _) = try await HTTPTransport.receive(request, timeout: 120, maxBytes: 2 * 1024 * 1024, redirects: false)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let choices = json?["choices"] as? [[String: Any]]
-        let message = choices?.first?["message"] as? [String: Any]
-        return (message?["content"] as? String) ?? String(data: data, encoding: .utf8) ?? ""
+        guard json?["error"] == nil, let choice = (json?["choices"] as? [[String: Any]])?.first,
+              let message = choice["message"] as? [String: Any], message["role"] as? String == "assistant",
+              let reply = message["content"] as? String, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.completion }
+        guard choice["finish_reason"] as? String == "stop" else {
+            if choice["finish_reason"] as? String == "length" { throw Failure.incomplete(String(reply.prefix(2000))) }
+            throw Failure.completion
+        }
+        return reply
+    }
+
+    @MainActor
+    private static func apiRequest(settings: SettingsStore, path: String, timeout: TimeInterval) throws -> URLRequest {
+        guard var parts = URLComponents(string: settings.hermesAPIURL),
+              ["http", "https"].contains(parts.scheme ?? ""), parts.host != nil,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil else { throw URLError(.badURL) }
+        var base = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if base.split(separator: "/").last != "v1" { base += base.isEmpty ? "v1" : "/v1" }
+        parts.path = "/" + base + "/" + path
+        guard let url = parts.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
+        if !settings.hermesToken.isEmpty { request.setValue("Bearer \(settings.hermesToken)", forHTTPHeaderField: "Authorization") }
+        return request
     }
 
     static func which(_ name: String) -> String? {
@@ -130,9 +131,4 @@ enum HermesClient {
         return paths.map { URL(fileURLWithPath: $0).appendingPathComponent(name).path }
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
-}
-
-private final class NoAgentRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }

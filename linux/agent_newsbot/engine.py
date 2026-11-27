@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -10,12 +9,12 @@ from typing import Any
 from urllib.parse import quote
 
 import feedparser
-import requests
 
 from . import hashtags, worldmonitor
 from .stories import StoryStore
 from .url_safety import safe_article_url
 from . import coverage
+from . import http_client
 from .config import (
     ALL_DESKS,
     Article,
@@ -39,16 +38,6 @@ from .store import (
 )
 
 log = logging.getLogger("agent_newsbot")
-_THREAD_LOCAL = threading.local()
-
-
-def _session() -> requests.Session:
-    sess = getattr(_THREAD_LOCAL, "session", None)
-    if sess is None:
-        sess = requests.Session()
-        sess.headers.update({"User-Agent": USER_AGENT})
-        _THREAD_LOCAL.session = sess
-    return sess
 
 
 def _get(
@@ -56,11 +45,11 @@ def _get(
     accept: str = "*/*",
     timeout: int = 14,
     extra_headers: dict[str, str] | None = None,
-) -> requests.Response:
-    headers = {"Accept": accept}
+) -> http_client.Response:
+    headers = {"Accept": accept, "User-Agent": USER_AGENT}
     if extra_headers:
         headers.update(extra_headers)
-    return _session().get(url, timeout=timeout, headers=headers)
+    return http_client.get(url, timeout=timeout, headers=headers)
 
 
 def fetch_rss(desk: str, store: FreshnessStore, lookback: float, limit: int) -> DeskResult:

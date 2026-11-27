@@ -199,6 +199,7 @@ struct AgentStatus: Equatable {
     var label: String
     var detail: String
     var ready: Bool
+    var canSend: Bool = false
 }
 
 enum UserAgent {
@@ -218,8 +219,7 @@ enum Net {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue(UserAgent.current, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let (data, http) = try await HTTPTransport.receive(request, timeout: timeout)
         guard (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         return data
     }
@@ -240,8 +240,7 @@ enum Net {
         if let lastModified, !lastModified.isEmpty {
             request.setValue(lastModified, forHTTPHeaderField: "If-Modified-Since")
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let (data, http) = try await HTTPTransport.receive(request, timeout: timeout)
         if http.statusCode == 304 {
             return ConditionalResponse(
                 notModified: true,

@@ -168,7 +168,7 @@ def test_engine_combines_provider_with_existing_sources(tmp_path, monkeypatch):
 def swift_harness(tmp_path_factory):
     if sys.platform != "darwin": pytest.skip("Swift macOS harness")
     dest = tmp_path_factory.mktemp("swift") / "integration-harness"
-    files = ["Models", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
+    files = ["Models", "HTTPTransport", "SnapshotWriter", "BridgeCredential", "ConsumerStore", "LibraryStore", "ResearchPackage", "AgentProcess", "HermesClient", "OpenClawClient", "Coverage", "SnapshotPolicy", "Freshness", "Hashtagger", "XText", "StoryStore", "WorldMonitorClient", "AgentBridge", "MarketsClient", "SkillInstaller", "SettingsStore", "Paths", "RSSClient", "Feeds"]
     subprocess.run(["swiftc", *[str(ROOT / f"Sources/{f}.swift") for f in files], str(ROOT / "tests/IntegrationHarness.swift"), "-o", str(dest)], check=True, capture_output=True)
     shutil.copyfile(ROOT / "linux/agent_newsbot/vendor/twitter-text.js", dest.parent / "twitter-text.js")
     return dest
@@ -1159,7 +1159,7 @@ def test_native_hermes_http_handoff_bounds(swift_harness, mode):
             self.send_response(302 if mode == "redirect" else 200)
             if mode == "redirect": self.send_header("Location", "/redirected")
             self.end_headers()
-            result = b"x" * (2 * 1024 * 1024 + 1) if mode == "oversize" else json.dumps({"choices": [{"message": {"content": "Draft accepted"}}]}).encode()
+            result = b"x" * (2 * 1024 * 1024 + 1) if mode == "oversize" else json.dumps({"choices": [{"message": {"role": "assistant", "content": "Draft accepted"}, "finish_reason": "stop"}]}).encode()
             try: self.wfile.write(result)
             except (BrokenPipeError, ConnectionResetError): pass
         def log_message(self, *args): pass
@@ -1450,3 +1450,139 @@ def test_native_snapshot_invalid_destination_preserved(swift_harness, tmp_path, 
     assert sentinel.read_text() == 'preserve me'
     assert latest.is_dir() if kind == 'directory' else latest.is_symlink()
     assert len(list(destination.iterdir())) == 1
+
+
+@pytest.mark.parametrize('body,can_send', [({}, False), ({'ok': True}, False),
+    ({'object':'list','data':[]}, False),
+    ({'object':'list','data':[{'id':'different-model'}]}, False),
+    ({'object':'list','data':[{'id':'hermes-agent'}]}, True)])
+def test_agent_readiness_requires_compatible_model_list(swift_harness, body, can_send):
+    with provider(body) as (base, calls):
+        result = swift(swift_harness, 'hermes-probe', base)
+        assert result['ready'] is False  # Discovery never claims an actual reply.
+        assert result['can_send'] is can_send
+        assert [path for path, _ in calls] == ['/v1/models']
+
+
+@pytest.mark.parametrize('value', [{}, {'error':{'message':'failed'}}, {'choices':[]},
+    {'choices':[{'message':{'role':'assistant','content':''},'finish_reason':'stop'}]},
+    {'choices':[{'message':{'role':'assistant','content':'   '},'finish_reason':'stop'}]},
+    {'choices':[{'message':{'role':'user','content':'echoed'},'finish_reason':'stop'}]},
+    {'choices':[{'message':{'role':'assistant','content':'diagnostic'},'finish_reason':'error'}]},
+    {'choices':[{'message':{'role':'assistant','content':'partial'},'finish_reason':'length'}]},
+    {'choices':[{'message':{'role':'assistant','content':'cancelled'},'finish_reason':'cancelled'}]}])
+def test_agent_invalid_and_incomplete_completion_is_not_success(swift_harness, value):
+    with agent_response(value) as (base, _):
+        assert 'error' in swift(swift_harness, 'hermes-api', base)
+
+
+@contextmanager
+def agent_response(value):
+    calls=[]
+    class Agent(BaseHTTPRequestHandler):
+        def do_POST(self):
+            calls.append((self.path, json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+            self.send_response(200); self.end_headers()
+            self.wfile.write(json.dumps(value).encode())
+        def log_message(self,*args): pass
+    httpd=ThreadingHTTPServer(('127.0.0.1',0),Agent)
+    thread=threading.Thread(target=httpd.serve_forever,daemon=True); thread.start()
+    try: yield f'http://127.0.0.1:{httpd.server_port}', calls
+    finally: httpd.shutdown(); httpd.server_close(); thread.join()
+
+
+@pytest.mark.parametrize('reply,passed', [('NEWSBOT_CONNECTION_OK',True), ('something else',False)])
+def test_agent_explicit_reply_test_and_v1_base(swift_harness, reply, passed):
+    value={'choices':[{'message':{'role':'assistant','content':reply},'finish_reason':'stop'}]}
+    with agent_response(value) as (base,calls):
+        result=swift(swift_harness,'hermes-test',base+'/v1','custom-profile')
+        assert result.get('tested',False) is passed
+        assert calls[0][0]=='/v1/chat/completions'
+        assert calls[0][1]['model']=='custom-profile'
+        assert calls[0][1]['stream'] is False
+        assert 'Do not use tools' in calls[0][1]['messages'][0]['content']
+
+
+@pytest.mark.parametrize('runtime',['python','swift'])
+@pytest.mark.parametrize('mode',['oversize','compressed','trickle','redirect_loop'])
+def test_direct_provider_stream_bounds(runtime, mode, request):
+    import gzip, time
+    from agent_newsbot import http_client
+    sent=[]; calls=[]
+    class Source(BaseHTTPRequestHandler):
+        def do_GET(self):
+            calls.append(self.path)
+            if mode=='redirect_loop':
+                self.send_response(302); self.send_header('Location','/loop'); self.end_headers(); return
+            self.send_response(200)
+            if mode=='compressed': self.send_header('Content-Encoding','gzip')
+            self.end_headers()
+            try:
+                if mode=='compressed':
+                    self.wfile.write(gzip.compress(b'x'*(6*1024*1024))); return
+                if mode=='trickle':
+                    for _ in range(80):
+                        self.wfile.write(b'x'); self.wfile.flush(); time.sleep(.05)
+                    return
+                for _ in range(96):
+                    self.wfile.write(b'x'*65536); self.wfile.flush(); sent.append(65536); time.sleep(.005)
+            except (BrokenPipeError, ConnectionResetError): pass
+        def log_message(self,*args): pass
+    httpd=ThreadingHTTPServer(('127.0.0.1',0),Source)
+    thread=threading.Thread(target=httpd.serve_forever,daemon=True); thread.start()
+    binary=request.getfixturevalue('swift_harness') if runtime=='swift' else None
+    base=f'http://127.0.0.1:{httpd.server_port}'
+    timeout=0.8 if mode=='trickle' else 8
+    start=time.monotonic()
+    try:
+        if runtime=='swift': assert 'error' in swift(binary,'http-get',base,timeout)
+        else:
+            with pytest.raises(http_client.RequestFailure): engine._get(base,timeout=timeout)
+        if mode=='trickle': assert time.monotonic()-start < 3
+        if mode=='oversize': assert sum(sent) < 6*1024*1024
+        if mode=='redirect_loop': assert len(calls)<=6
+    finally: httpd.shutdown(); httpd.server_close(); thread.join()
+
+
+def test_direct_provider_timeout_reaps_worker(monkeypatch):
+    from agent_newsbot import http_client
+    import time
+    class Slow(BaseHTTPRequestHandler):
+        def do_GET(self): time.sleep(2)
+        def log_message(self,*args): pass
+    httpd=ThreadingHTTPServer(('127.0.0.1',0),Slow)
+    thread=threading.Thread(target=httpd.serve_forever,daemon=True); thread.start()
+    spawned=[]; original=subprocess.Popen
+    def tracked(*args,**kwargs):
+        child=original(*args,**kwargs); spawned.append(child); return child
+    monkeypatch.setattr(http_client.subprocess,'Popen',tracked)
+    try:
+        with pytest.raises(http_client.RequestFailure) as exc: http_client.get(f'http://127.0.0.1:{httpd.server_port}',timeout=.5)
+        assert exc.value.code=='total_timeout'
+        assert len(spawned)==1 and spawned[0].poll() is not None
+    finally: httpd.shutdown(); httpd.server_close(); thread.join()
+
+
+@pytest.mark.parametrize('status',[401,403,404,429])
+def test_agent_probe_actionable_http_errors(swift_harness,status):
+    with provider({'error':'do not echo provider body'}, status) as (base,_):
+        result=swift(swift_harness,'hermes-probe',base)
+        assert result['ready'] is False and result['can_send'] is False
+        assert str(status) in result['detail']
+        assert 'do not echo' not in result['detail']
+
+
+def test_direct_provider_http_error_retains_retry_after():
+    from agent_newsbot import http_client
+    class Limited(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(429); self.send_header('Retry-After','60'); self.end_headers()
+            self.wfile.write(b'private diagnostic')
+        def log_message(self,*args): pass
+    httpd=ThreadingHTTPServer(('127.0.0.1',0),Limited)
+    thread=threading.Thread(target=httpd.serve_forever,daemon=True); thread.start()
+    try:
+        with pytest.raises(http_client.RequestFailure) as exc: engine._get(f'http://127.0.0.1:{httpd.server_port}')
+        assert (exc.value.status,exc.value.retry_after)==(429,'60')
+        assert 'private' not in str(exc.value)
+    finally: httpd.shutdown(); httpd.server_close(); thread.join()

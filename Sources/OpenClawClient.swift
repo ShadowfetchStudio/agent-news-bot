@@ -9,8 +9,8 @@ enum OpenClawClient {
             return AgentStatus(
                 kind: .openclaw,
                 label: "OpenClaw CLI",
-                detail: listening ? "CLI + gateway \(settings.openClawURL)" : cli,
-                ready: true
+                detail: "CLI detected at \(cli). " + (listening ? "Gateway reachable. " : "") + "Model/authentication not tested.",
+                ready: false, canSend: true
             )
         }
         if await portOpen(settings.openClawURL) {
@@ -42,8 +42,17 @@ enum OpenClawClient {
         )
     }
 
+    @MainActor
+    static func test(settings: SettingsStore) async throws {
+        guard let path = HermesClient.which("openclaw") else { throw HermesClient.Failure.empty }
+        let reply = try await runCLI(path: path, prompt: HermesClient.testPrompt)
+        guard reply.trimmingCharacters(in: .whitespacesAndNewlines) == "NEWSBOT_CONNECTION_OK" else { throw HermesClient.Failure.testReply }
+    }
+
     private static func runCLI(path: String, prompt: String) async throws -> String {
-        try await AgentProcess.run(path: path, arguments: ["agent", "--message", prompt])
+        let reply = try await AgentProcess.run(path: path, arguments: ["agent", "--message", prompt])
+        guard !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw HermesClient.Failure.empty }
+        return reply
     }
 
     static func portOpen(_ urlString: String) async -> Bool {

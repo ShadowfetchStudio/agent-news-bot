@@ -44,10 +44,14 @@ struct SettingsView: View {
             Section("Hermes") {
                 Toggle("Prefer `hermes chat` CLI", isOn: $settings.hermesUseCLI)
                 TextField("API base URL", text: $settings.hermesAPIURL)
+                TextField("API model name", text: $settings.hermesModel)
                 SecureField("API bearer token (optional)", text: $hermesToken)
-                Text("Native send uses `hermes chat -Q` when the CLI is on PATH. Otherwise POST /v1/chat/completions. Local Hermes was detected at ~/.local/bin/hermes.")
+                Text("CLI detection and a compatible model list do not verify model access. Test reply sends a short fixed prompt using your saved credentials and may use paid model capacity. Save credential changes first.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Test Hermes reply") { Task { await engine.testAgent(.hermes) } }.disabled(engine.agentTestRunning)
+                Button("Check connections without a model reply") { Task { await engine.refreshAgents() } }.disabled(engine.agentTestRunning)
+                Text(engine.hermes.detail).font(.caption).textSelection(.enabled)
             }
             Section("OpenClaw") {
                 TextField("Gateway URL", text: $settings.openClawURL)
@@ -55,6 +59,9 @@ struct SettingsView: View {
                 Text("The app probes the gateway on loopback and can send via the `openclaw` CLI. Agents can also pull GET /v1/fresh from the local bridge.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Test OpenClaw reply") { Task { await engine.testAgent(.openclaw) } }.disabled(engine.agentTestRunning)
+                Text("Test reply uses the CLI's configured model and credentials and may use paid capacity. Gateway tokens do not configure the CLI.").font(.caption).foregroundStyle(.secondary)
+                Text(engine.openclaw.detail).font(.caption).textSelection(.enabled)
             }
             Section("Agent bridge") {
                 Stepper(value: $settings.bridgePort, in: 1025...64999, step: 1) {
@@ -92,6 +99,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onChange(of: settings.hermesAPIURL) { engine.invalidateAgent(.hermes) }
+        .onChange(of: settings.hermesModel) { engine.invalidateAgent(.hermes) }
+        .onChange(of: settings.hermesUseCLI) { engine.invalidateAgent(.hermes) }
+        .onChange(of: settings.openClawURL) { engine.invalidateAgent(.openclaw) }
         .confirmationDialog("Replace the bridge credential? Existing clients must reload the token file.", isPresented: $confirmRotation) {
             Button("Rotate credential", role: .destructive) { engine.rotateBridgeCredential() }
             Button("Cancel", role: .cancel) {}
@@ -111,6 +122,7 @@ struct SettingsView: View {
             settings.save()
             engine.applyBridgeSettings()
             engine.configureAutomaticRefresh()
+            Task { await engine.refreshAgents() }
         }
     }
     private func saveCredentials() {
@@ -123,6 +135,8 @@ struct SettingsView: View {
             guard value != original else { continue }
             do {
                 try Keychain.set(value, account: account)
+                if account == "hermes-api" { engine.invalidateAgent(.hermes) }
+                if account == "openclaw" { engine.invalidateAgent(.openclaw) }
                 originalCredentials[account] = value
                 messages.append("\(account): saved.")
             } catch { messages.append("\(account): \(error.localizedDescription). Previous credential preserved if update failed.") }

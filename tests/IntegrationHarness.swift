@@ -17,6 +17,11 @@ import Security
             } catch { try output(["error": error.localizedDescription]) }
             return
         }
+        if args[1] == "http-get" {
+            do { try output(["bytes": try await Net.data(from: URL(string: args[2])!, timeout: Double(args[3])!).count]) }
+            catch { try output(["error": error.localizedDescription]) }
+            return
+        }
         if args[1] == "safe-urls" {
             let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: args[2]))) as! [String]
             try output(["safe": rows.map { ArticleURL.validated($0) != nil }]); return
@@ -42,16 +47,22 @@ import Security
             return
         }
         if args[1] == "port-probe" { try output(["ready": await OpenClawClient.portOpen(args[2])]); return }
-        if args[1] == "hermes-api" || args[1] == "hermes-probe" {
+        if ["hermes-api", "hermes-probe", "hermes-test"].contains(args[1]) {
             let settings = await MainActor.run { () -> SettingsStore in
                 let settings = SettingsStore.shared
                 settings.hermesUseCLI = false
                 settings.hermesAPIURL = args[2]
+                if args.count > 3 { settings.hermesModel = args[3] }
                 return settings
             }
             if args[1] == "hermes-probe" {
                 let status = await HermesClient.probe(settings: settings)
-                try output(["ready": status.ready]); return
+                try output(["ready": status.ready, "can_send": status.canSend, "detail": status.detail]); return
+            }
+            if args[1] == "hermes-test" {
+                do { try await HermesClient.test(settings: settings); try output(["tested": true]) }
+                catch { try output(["error": error.localizedDescription]) }
+                return
             }
             do { try output(["output": try await HermesClient.send(articles: [], settings: settings)]) }
             catch { try output(["error": "handoff failed"]) }

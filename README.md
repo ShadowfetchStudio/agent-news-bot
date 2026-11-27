@@ -314,17 +314,18 @@ symbols, bridge port, enabled desks) and persist in `UserDefaults`.
 
 ## Optional agent integrations (macOS)
 
-The macOS app can hand a selected batch to a **local** agent runtime if one is installed:
+The macOS app can hand a selected batch to an optional agent runtime:
 
-- **Hermes** — via a `hermes` CLI on `PATH`, or an OpenAI-compatible chat endpoint (default probe
-  `http://127.0.0.1:8642`; optional bearer token stored in Keychain).
-- **OpenClaw** — via an `openclaw` CLI, or a local gateway (default `ws://127.0.0.1:18789`).
+- **Hermes:** `hermes chat -Q` when the CLI is found in the supported executable locations, or a compatible API (default `http://127.0.0.1:8642`). Settings accepts an origin or a base ending in `/v1`, a model name (default `hermes-agent`), and an optional bearer token saved explicitly to Keychain.
+- **OpenClaw:** handoff uses the `openclaw` CLI's own model/authentication configuration. The gateway probe is reachability information only; there is no direct WebSocket handoff. The gateway token field does not configure the CLI.
 
-Both are **optional** and default to localhost. If neither is present, agents can still simply
-`GET /v1/fresh` from the bridge — the integrations are a convenience, not a requirement. On launch
-the app also writes a small skill descriptor to `~/.hermes/skills/` and `~/.agents/skills/`
-referencing the `0600` token file path (never embedding the raw token in plaintext) so a co-located
-agent can discover the local desk safely.
+A detected CLI or compatible model list means a handoff can be attempted; neither is labeled a verified reply. **Check connections without a model reply** performs discovery only. **Test Hermes reply** and **Test OpenClaw reply** send a short fixed prompt requiring a specific acknowledgement, with no story material. These explicit tests can consume paid model capacity and use saved credentials; save credential edits first. A valid test or completed handoff records the last verified reply time for the current session and connection settings. Changing those settings clears verification. An external change to an agent's own configuration requires a new test.
+
+Hermes API discovery validates `/v1/models` and the configured model, rather than accepting an arbitrary `/health` response. Handoffs require nonempty assistant text and a completed `stop` result; empty/error-shaped/cancelled responses fail visibly. A `length` result is reported as incomplete, not a completed handoff. Redirects are refused for authenticated agent requests. Authentication, permission, missing endpoint/model and rate-limit errors have distinct messages. These contracts follow the [Hermes API documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server); successful discovery does not establish that its underlying model credentials work.
+
+Both integrations are optional. Agents can pull the authenticated local bridge independently. Use **Install agent skills** in Settings to create descriptors in `~/.hermes/skills/` and `~/.agents/skills/`; startup does not install them, and existing custom files are preserved. Descriptors reference the private token-file path rather than embedding its contents.
+
+All direct RSS/Hacker News/market/weather/prediction transfers share a **4 MiB decoded-body limit** while receiving and a total deadline (normally 14 seconds; existing source-specific 8/12-second deadlines remain). Linux runs each direct request in an owned worker and kills/reaps it at the parent deadline, including slow DNS/headers/redirects. macOS uses an ephemeral URLSession resource deadline and bounded streaming reads. Direct redirects are limited to five and HTTPS downgrades are rejected. Conditional 304 caching remains supported. World Monitor retains its separate 4 MiB/20-second boundary. Persistent source backoff/circuit breakers remain tracked release work.
 
 ## Screenshots
 
