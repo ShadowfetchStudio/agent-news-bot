@@ -45,11 +45,13 @@ struct StoryHistoryView: View {
                                 Text("Earlier summary").font(.caption.bold())
                                 Text(old).foregroundStyle(Theme.textMed)
                             }
-                            Text("Updated summary").font(.caption.bold())
+                            Text(entry.gap ? "Recorded summary" : "Updated summary").font(.caption.bold())
                             Text(summary)
                         }
-                        Text("Changed: " + entry.fields.joined(separator: ", "))
-                            .font(.caption).foregroundStyle(Theme.textLow)
+                        if !entry.gap && !entry.fields.isEmpty {
+                            Text("Changed: " + entry.fields.joined(separator: ", "))
+                                .font(.caption).foregroundStyle(Theme.textLow)
+                        }
                     }.padding(.vertical, 6).textSelection(.enabled)
                 }
             }
